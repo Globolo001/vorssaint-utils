@@ -199,7 +199,13 @@ struct MenuBarMetricsPreview: View {
                         .frame(width: MenuBarRenderer.pingGraphSize(style: style).width,
                                height: MenuBarRenderer.pingGraphSize(style: style).height)
                 }
-                pingBlock(label: label, value: value, state: state, style: style)
+                pingBlock(label: label, value: value, style: style)
+                if mode == .status {
+                    Image(systemName: MenuBarMetric.ping.symbolName)
+                        .font(.system(size: style == .readable ? 11.8 : 10.8, weight: .semibold))
+                        .foregroundStyle(MenuBarRenderer.pingLevel(state).map(levelColor)
+                                         ?? (state == .unknown ? Color.white.opacity(0.55) : Color.white))
+                }
             }
             .fixedSize(horizontal: true, vertical: true)
         case let .diskActivityBlock(read, write, style):
@@ -273,7 +279,6 @@ struct MenuBarMetricsPreview: View {
 
     private func pingBlock(label: String,
                            value: String,
-                           state: PingTracker.State,
                            style: MenuBarBlockStyle) -> some View {
         VStack(spacing: -1) {
             Text(label)
@@ -282,8 +287,7 @@ struct MenuBarMetricsPreview: View {
                 .font(.system(size: style == .readable ? 13 : 12,
                               weight: .semibold,
                               design: .monospaced))
-                .foregroundStyle(MenuBarRenderer.pingLevel(state).map(levelColor) ?? Color.white)
-                .frame(minWidth: style == .readable ? 39 : 36, alignment: .trailing)
+                .frame(minWidth: style == .readable ? 39 : 36, alignment: .center)
         }
         .foregroundStyle(.white)
         .fixedSize(horizontal: true, vertical: true)

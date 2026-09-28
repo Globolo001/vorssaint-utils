@@ -1223,15 +1223,19 @@ enum MenuBarRenderer {
         let valueSizing: [NSAttributedString.Key: Any] = [.font: valueFont]
         let labelSize = (label as NSString).size(withAttributes: [.font: labelFont])
         let valueSize = (value as NSString).size(withAttributes: valueSizing)
-        let columnWidth = PingFormat.menuBarReserves
+        let columnWidth = max(labelSize.width, PingFormat.menuBarReserves
             .map { ($0 as NSString).size(withAttributes: valueSizing).width }
-            .max() ?? 0
-        let tileWidth = max(labelSize.width, columnWidth)
+            .max() ?? 0)
         let graphSize = pingGraphSize(style: style)
-        let markWidth: CGFloat = mode == .graph ? graphSize.width + 3 : 0
-        let width = ceil(markWidth + tileWidth + (style == .readable ? 2 : 0.5))
+        let iconSide: CGFloat = style == .readable ? 12.4 : 11.4
+        let leading: CGFloat = mode == .graph ? graphSize.width + 3 : 0
+        let trailing: CGFloat = mode == .status ? 3 + iconSide : 0
+        let padding: CGFloat = style == .readable ? 2 : 0.5
+        let width = ceil(leading + columnWidth + trailing + padding)
+        let columnEnd = mode == .status ? width - padding / 2 - trailing : width
         let height: CGFloat = style == .readable ? 23 : 21
-        let valueY: CGFloat = style == .readable ? -0.4 : -0.8
+        let iconColor: NSColor = tintHex.map { usageBarColor(hex: $0) }
+            ?? (state == .unknown ? .secondaryLabelColor : .labelColor)
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             NSColor.clear.setFill()
             rect.fill()
@@ -1242,17 +1246,27 @@ enum MenuBarRenderer {
                                        height: graphSize.height)
                 drawPingGraph(graph, in: graphRect, state: state)
             }
-            let tileX = markWidth + (width - markWidth - tileWidth) / 2
-            (label as NSString).draw(at: NSPoint(x: tileX + (tileWidth - labelSize.width) / 2,
+            let columnX = leading + (columnEnd - leading - columnWidth) / 2
+            (label as NSString).draw(at: NSPoint(x: columnX + (columnWidth - labelSize.width) / 2,
                                                  y: style == .readable ? 12.9 : 12.0),
                                      withAttributes: dynamicTextAttributes(font: labelFont))
-            let columnX = tileX + (tileWidth - columnWidth) / 2
-            var valueAttrs = dynamicTextAttributes(font: valueFont)
-            if let tintHex {
-                valueAttrs[.foregroundColor] = usageBarColor(hex: tintHex)
+            (value as NSString).draw(at: NSPoint(x: columnX + (columnWidth - valueSize.width) / 2,
+                                                 y: style == .readable ? -0.4 : -0.8),
+                                     withAttributes: dynamicTextAttributes(font: valueFont))
+            if mode == .status {
+                let configuration = NSImage.SymbolConfiguration(pointSize: style == .readable ? 11.8 : 10.8,
+                                                                weight: .semibold)
+                    .applying(NSImage.SymbolConfiguration(paletteColors: [iconColor]))
+                if let symbol = NSImage(systemSymbolName: MenuBarMetric.ping.symbolName, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(configuration) {
+                    let scale = min(iconSide / symbol.size.width, iconSide / symbol.size.height, 1)
+                    let drawSize = NSSize(width: symbol.size.width * scale, height: symbol.size.height * scale)
+                    symbol.draw(in: NSRect(x: columnEnd + 3 + (iconSide - drawSize.width) / 2,
+                                           y: (height - drawSize.height) / 2,
+                                           width: drawSize.width,
+                                           height: drawSize.height))
+                }
             }
-            (value as NSString).draw(at: NSPoint(x: columnX + columnWidth - valueSize.width, y: valueY),
-                                     withAttributes: valueAttrs)
             return true
         }
         image.isTemplate = false
