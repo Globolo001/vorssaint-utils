@@ -32,9 +32,11 @@ final class PingSampler {
         }
     }
 
-    func reset() {
-        targets.values.forEach { $0.close() }
-        targets.removeAll()
+    func pause() {
+        for target in targets.values {
+            target.close()
+            target.tracker = PingTracker()
+        }
     }
 
     private func read(_ target: PingTarget, slotSeconds: TimeInterval) -> PingReading {

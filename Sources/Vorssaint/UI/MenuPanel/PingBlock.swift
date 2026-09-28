@@ -80,7 +80,9 @@ struct PingBlock: View {
     private func row(_ host: PingHost) -> some View {
         let reading = reading(for: host)
         let window = reading?.window(seconds: PingHistory.span)
-        let values = window?.values ?? []
+        let values = window?.values ?? Array(repeating: .nan,
+                                             count: PingHistory.slotCount(span: PingHistory.span,
+                                                                          slotSeconds: PingReading(host: host).slotSeconds))
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 statusDot(reading)
@@ -96,8 +98,9 @@ struct PingBlock: View {
                 }
                 Spacer(minLength: 4)
                 value(for: reading)
+                    .frame(height: 17)
             }
-            if showGraph, values.count >= 2 {
+            if showGraph {
                 Sparkline(values: values,
                           color: graphColor(reading),
                           maxValue: max(20, (values.filter(\.isFinite).max() ?? 0) * 1.1),
@@ -108,20 +111,17 @@ struct PingBlock: View {
                           gapMarkColor: PanelMetricColor.red(for: colorScheme))
                     .frame(height: 22)
             }
-            if let reading, reading.hasSamples {
-                HStack(spacing: 10) {
-                    Text("\(strings.loss) \(PingFormat.percent(reading.lossRatio))")
-                        .foregroundStyle(reading.lossRatio >= 0.01
-                                         ? AnyShapeStyle(PanelMetricColor.red(for: colorScheme))
-                                         : AnyShapeStyle(.tertiary))
-                    if let summary = PingFormat.summary(reading.answeredMilliseconds) {
-                        Text(summary)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .font(.system(size: 9.5, design: .monospaced))
-                .monospacedDigit()
+            HStack(spacing: 10) {
+                let lossRatio = reading?.hasSamples == true ? reading?.lossRatio : nil
+                Text("\(strings.loss) \(lossRatio.map(PingFormat.percent) ?? PingFormat.value(nil))")
+                    .foregroundStyle((lossRatio ?? 0) >= 0.01
+                                     ? AnyShapeStyle(PanelMetricColor.red(for: colorScheme))
+                                     : AnyShapeStyle(.tertiary))
+                Text(reading.flatMap { PingFormat.summary($0.answeredMilliseconds) } ?? PingFormat.value(nil))
+                    .foregroundStyle(.tertiary)
             }
+            .font(.system(size: 9.5, design: .monospaced))
+            .monospacedDigit()
         }
     }
 
@@ -162,26 +162,28 @@ struct PingBlock: View {
                     Text(strings.down)
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(PanelMetricColor.red(for: colorScheme))
-                } else if let rtt = reading.lastRTT {
-                    HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        Text(PingFormat.value(rtt, inSeconds: reading.showsSeconds))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
-                        if !reading.showsSeconds {
-                            Text("ms")
-                                .font(.system(size: 9.5, weight: .medium))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .foregroundStyle(reading.state == .suspect ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 } else {
-                    statusText(l10n.s.networkMeasuring)
+                    rtt(reading.lastRTT, inSeconds: reading.showsSeconds, dimmed: reading.state != .up)
                 }
             }
         } else {
-            statusText(l10n.s.networkMeasuring)
+            rtt(nil, inSeconds: false, dimmed: true)
         }
+    }
+
+    private func rtt(_ seconds: TimeInterval?, inSeconds: Bool, dimmed: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 1) {
+            Text(PingFormat.value(seconds, inSeconds: inSeconds))
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            if !inSeconds {
+                Text("ms")
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(dimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
     }
 
     private func statusText(_ text: String) -> some View {

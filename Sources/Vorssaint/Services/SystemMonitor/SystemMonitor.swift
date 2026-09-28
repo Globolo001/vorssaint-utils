@@ -203,6 +203,7 @@ final class SystemMonitor: ObservableObject {
     private var lastPeripheralBatterySample = PeripheralBatterySample()
     private var lastConnectedDevices: [ConnectedUSBDevice] = []
     private var lastPingReadings: [PingReading] = []
+    private var pingPaused = true
     private var lastPublishedPlan: SamplingPlan?
     private var lastPublishedForeground: Bool?
 
@@ -619,9 +620,9 @@ final class SystemMonitor: ObservableObject {
         timer?.invalidate()
         timer = nil
         queue.async { [weak self] in
-            guard let self, !self.lastPingReadings.isEmpty else { return }
-            self.pingSampler.reset()
-            self.lastPingReadings = []
+            guard let self else { return }
+            self.pingSampler.pause()
+            self.pingPaused = true
         }
     }
 
@@ -729,6 +730,7 @@ final class SystemMonitor: ObservableObject {
 
             if plan.needPing {
                 if take(.ping) {
+                    self.pingPaused = false
                     let stride = MonitorSamplingPolicy.sampleStride(for: .ping,
                                                                     intervalSeconds: intervalSeconds,
                                                                     foreground: foregroundSampling)
@@ -736,9 +738,9 @@ final class SystemMonitor: ObservableObject {
                                                                     slotSeconds: TimeInterval(max(1, intervalSeconds) * stride))
                 }
                 next.pings = self.lastPingReadings
-            } else if !self.lastPingReadings.isEmpty {
-                self.pingSampler.reset()
-                self.lastPingReadings = []
+            } else if !self.pingPaused {
+                self.pingSampler.pause()
+                self.pingPaused = true
             }
 
             if plan.needCPU {
