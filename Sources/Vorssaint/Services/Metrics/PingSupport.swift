@@ -113,6 +113,7 @@ struct PingReading: Equatable {
     var slotSeconds: TimeInterval = 2
     var rttHistory: [Double] = []
     var lostHistory: [Double] = []
+    var recentHistory: [Double] = []
 
     var graphValues: [Double] {
         zip(rttHistory, lostHistory).map { rtt, lost in lost > 0 ? .nan : rtt }
@@ -139,12 +140,6 @@ struct PingReading: Equatable {
             return (Array(repeating: .nan, count: padding) + values, Array(repeating: false, count: padding) + marks)
         }
         return (Array(values.suffix(count)), Array(marks.suffix(count)))
-    }
-
-    func recentSamples(_ count: Int) -> [Double] {
-        let marks = lostMarks
-        let samples = graphValues.indices.filter { graphValues[$0].isFinite || marks[$0] }
-        return samples.suffix(count).map { graphValues[$0] }
     }
 
     var isUnreachable: Bool {
@@ -328,8 +323,10 @@ struct PingTracker {
 
 struct PingHistory {
     static let span: TimeInterval = 120
+    static let recentCapacity = 120
 
     private(set) var samples: [PingSample] = []
+    private(set) var recent: [Double] = []
 
     static func slotCount(span: TimeInterval, slotSeconds: TimeInterval) -> Int {
         guard slotSeconds.isFinite, slotSeconds > 0 else { return 2 }
@@ -338,6 +335,8 @@ struct PingHistory {
 
     mutating func record(_ sample: PingSample) {
         guard !sample.late else { return }
+        recent.append(sample.rtt.map { $0 * 1000 } ?? .nan)
+        if recent.count > Self.recentCapacity { recent.removeFirst(recent.count - Self.recentCapacity) }
         let index = samples.lastIndex { $0.sentAt <= sample.sentAt }.map { $0 + 1 } ?? 0
         samples.insert(sample, at: index)
         if let newest = samples.last?.sentAt {
@@ -347,6 +346,7 @@ struct PingHistory {
 
     mutating func reset() {
         samples.removeAll()
+        recent.removeAll()
     }
 
     func window(now: TimeInterval, slotSeconds: TimeInterval) -> (rttMs: [Double], lost: [Double]) {

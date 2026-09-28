@@ -176,6 +176,19 @@ enum PingTrackerTests {
                         && PingHistory.slotCount(span: PingHistory.span, slotSeconds: 5) == 24,
                      "the window covers the same span at every sampling interval")
 
+        var arrivals = PingHistory()
+        arrivals.record(PingSample(sequence: 1, sentAt: 10, rtt: 0.02, late: false))
+        arrivals.record(PingSample(sequence: 2, sentAt: 500, rtt: nil, late: false))
+        arrivals.record(PingSample(sequence: 3, sentAt: 11, rtt: 0.03, late: true))
+        arrivals.record(PingSample(sequence: 4, sentAt: 501, rtt: 0.04, late: false))
+        suite.expect(arrivals.recent.count == 3 && arrivals.recent[0] == 20 && arrivals.recent[1].isNaN
+                        && arrivals.recent[2] == 40,
+                     "the menu bar graph keeps answers back to back in arrival order, a loss as a gap")
+        for index in 0..<200 { arrivals.record(PingSample(sequence: UInt16(index), sentAt: 600, rtt: 0.01, late: false)) }
+        suite.expect(arrivals.recent.count == PingHistory.recentCapacity, "the menu bar graph history is bounded")
+        arrivals.reset()
+        suite.expect(arrivals.recent.isEmpty, "a reset clears the menu bar graph history")
+
         let empty = PingHistory().window(now: 100, slotSeconds: 2)
         suite.expect(empty.rttMs.count == slots && empty.rttMs.allSatisfy(\.isNaN) && !empty.lost.contains(1),
                      "an empty history is a full window of gaps")
@@ -279,13 +292,6 @@ enum PingTrackerTests {
                      "a shorter view pads on the left to keep its own fixed span")
         sparse.slotSeconds = 1
         suite.expect(sparse.window(seconds: 2).values.count == 2, "a shorter view keeps the newest slots")
-        var spread = PingReading(host: PingHost("1.1.1.1")!)
-        spread.rttHistory = [.nan, 10, .nan, .nan, 0, 30, .nan, 40]
-        spread.lostHistory = [0, 0, 0, 0, 1, 0, 0, 0]
-        let recent = spread.recentSamples(3)
-        suite.expect(spread.recentSamples(10).count == 4 && recent.count == 3 && recent[0].isNaN
-                        && recent[1] == 30 && recent[2] == 40,
-                     "the menu bar graph keeps the newest samples back to back, losses included")
         suite.expect(!PingReading(host: PingHost("1.1.1.1")!).hasSamples, "a fresh reading has no samples")
         suite.expect(!reading.isUnreachable, "an answering target is reachable")
         reading.state = .down

@@ -623,7 +623,7 @@ enum MenuBarRenderer {
                     let mode = PingMenuBarStyle.current
                     groups.append([.pingBlock(label: PingFormat.menuBarLabel,
                                               value: pingValue(for: reading),
-                                              graph: mode == .graph ? reading.recentSamples(pingGraphSamples) : [],
+                                              graph: mode == .graph ? Array(reading.recentHistory.suffix(pingGraphSamples)) : [],
                                               state: reading.isUnreachable ? .down : reading.state,
                                               mode: mode,
                                               style: style)])
@@ -1438,6 +1438,7 @@ enum MenuBarRenderer {
         let slots = PingHistory.slotCount(span: PingHistory.span, slotSeconds: ping.slotSeconds)
         ping.rttHistory = Array(repeating: 999, count: slots)
         ping.lostHistory = Array(repeating: 0, count: slots)
+        ping.recentHistory = Array(repeating: 999, count: pingGraphSamples)
         snapshot.pings = [ping]
         snapshot.disk = DiskReading(devices: [
             DiskDeviceReading(id: "main",

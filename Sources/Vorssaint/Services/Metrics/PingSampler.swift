@@ -65,6 +65,7 @@ final class PingSampler {
         reading.lossRatio = target.history.lossRatio(now: now)
         reading.rttHistory = window.rttMs
         reading.lostHistory = window.lost
+        reading.recentHistory = target.history.recent
         return reading
     }
 
