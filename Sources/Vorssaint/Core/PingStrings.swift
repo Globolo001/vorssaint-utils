@@ -55,7 +55,7 @@ extension PingFeatureStrings {
         down: "Down",
         menuBarDown: "DOWN",
         resolving: "Resolving…",
-        unresolved: "Can't resolve",
+        unresolved: "Can’t resolve",
         unavailable: "Ping unavailable",
         loss: "Loss",
         remove: "Remove",
@@ -210,7 +210,7 @@ extension PingFeatureStrings {
         measuring: "Mesure…",
         targetsTitle: "Cibles du ping",
         otherTarget: "Autre hôte…",
-        targetsCaption: "Pinguées tant que le bloc Ping est affiché dans le panneau ou que l'élément Ping de la barre des menus est activé.",
+        targetsCaption: "Pinguées tant que le bloc Ping est affiché dans le panneau ou que l’élément Ping de la barre des menus est activé.",
         menuBarTarget: "Cible du ping",
         noTargets: "Aucune cible de ping"
     )
@@ -231,7 +231,7 @@ extension PingFeatureStrings {
         measuring: "Misurazione…",
         targetsTitle: "Destinazioni ping",
         otherTarget: "Altro host…",
-        targetsCaption: "Ricevono il ping mentre il blocco Ping è visibile nel pannello o l'elemento Ping della barra dei menu è attivo.",
+        targetsCaption: "Ricevono il ping mentre il blocco Ping è visibile nel pannello o l’elemento Ping della barra dei menu è attivo.",
         menuBarTarget: "Destinazione ping",
         noTargets: "Nessuna destinazione ping"
     )
