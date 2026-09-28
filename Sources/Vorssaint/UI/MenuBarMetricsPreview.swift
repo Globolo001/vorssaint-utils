@@ -201,7 +201,7 @@ struct MenuBarMetricsPreview: View {
                 }
                 metricBlock(label: label,
                             value: value,
-                            minimumValue: PingFormat.menuBarReserve,
+                            minimumValue: PingFormat.menuBarReserves[0],
                             style: style,
                             pressure: mode == .dot ? MenuBarRenderer.pingPressure(state) : nil)
             }

@@ -141,13 +141,14 @@ enum PingFormat {
             : String(format: "%.0f", locale: MetricFormat.locale, value.rounded())
     }
 
-    static let menuBarReserve = "888ms"
+    static let menuBarLabel = "PING MS"
+    static let menuBarReserves = ["888", ">1s"]
 
     static func menuBarValue(_ seconds: TimeInterval?) -> String {
         guard let seconds, seconds.isFinite, seconds >= 0 else { return "–" }
         let value = seconds * 1000
-        if value < 9.95 { return String(format: "%.1f", locale: MetricFormat.locale, value) + "ms" }
-        if value < 999.5 { return String(format: "%.0f", locale: MetricFormat.locale, value.rounded()) + "ms" }
+        if value < 0.5 { return "<1" }
+        if value < 999.5 { return String(format: "%.0f", locale: MetricFormat.locale, value.rounded()) }
         return ">1s"
     }
 

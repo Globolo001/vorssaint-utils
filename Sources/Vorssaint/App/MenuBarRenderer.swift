@@ -621,7 +621,7 @@ enum MenuBarRenderer {
             case .ping:
                 if let reading = pingReading(in: snapshot) {
                     let mode = PingMenuBarStyle.current
-                    groups.append([.pingBlock(label: "PING",
+                    groups.append([.pingBlock(label: PingFormat.menuBarLabel,
                                               value: pingValue(for: reading),
                                               graph: mode == .graph ? Array(reading.graphValues.suffix(pingGraphSamples)) : [],
                                               state: reading.isUnreachable ? .down : reading.state,
@@ -1228,8 +1228,9 @@ enum MenuBarRenderer {
         let valueSizing: [NSAttributedString.Key: Any] = [.font: valueFont]
         let labelSize = (label as NSString).size(withAttributes: [.font: labelFont])
         let valueSize = (value as NSString).size(withAttributes: valueSizing)
-        let reservedWidth = max((PingFormat.menuBarReserve as NSString).size(withAttributes: valueSizing).width,
-                                (downText as NSString).size(withAttributes: valueSizing).width)
+        let reservedWidth = (PingFormat.menuBarReserves + [downText])
+            .map { ($0 as NSString).size(withAttributes: valueSizing).width }
+            .max() ?? 0
         let textWidth = max(labelSize.width, reservedWidth)
         let graphSize = pingGraphSize(style: style)
         let markWidth = mode == .graph ? graphSize.width : pingDotDiameter(style: style)

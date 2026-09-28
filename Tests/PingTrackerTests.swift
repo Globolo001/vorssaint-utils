@@ -236,14 +236,14 @@ enum PingTrackerTests {
         MetricFormat.locale = Locale(identifier: "en_US")
         suite.expect(PingFormat.milliseconds(3.24) == "3.2", "fast round trips keep one decimal")
         suite.expect(PingFormat.milliseconds(14.6) == "15", "slower round trips are whole milliseconds")
-        suite.expect(PingFormat.menuBarValue(0.0146) == "15ms", "the menu bar value is compact")
-        suite.expect(PingFormat.menuBarValue(0.00996) == "10ms" && PingFormat.menuBarValue(0.0042) == "4.2ms",
-                     "the menu bar value never grows a decimal past two digits")
-        suite.expect(PingFormat.menuBarValue(0.9994) == "999ms" && PingFormat.menuBarValue(1.2) == ">1s",
+        suite.expect(PingFormat.menuBarValue(0.0146) == "15" && PingFormat.menuBarValue(0.0042) == "4",
+                     "the menu bar value is whole milliseconds without a unit")
+        suite.expect(PingFormat.menuBarValue(0.0002) == "<1", "a sub-millisecond reply never reads as zero")
+        suite.expect(PingFormat.menuBarValue(0.9994) == "999" && PingFormat.menuBarValue(1.2) == ">1s",
                      "the menu bar value is capped at three digits")
-        let reserve = PingFormat.menuBarReserve.count
-        suite.expect([0.0001, 0.0042, 0.0999, 0.5, 0.9994, 3.0].allSatisfy { PingFormat.menuBarValue($0).count <= reserve },
-                     "every menu bar value fits the reserved width")
+        suite.expect([0.0001, 0.0042, 0.0999, 0.5, 0.9994, 3.0].allSatisfy { PingFormat.menuBarValue($0).count <= 3 },
+                     "every menu bar value fits three characters")
+        suite.expect(PingFormat.menuBarLabel == "PING MS", "the unit sits in the menu bar label")
         suite.expect(PingMenuBarStyle(rawValue: "graph") == .graph && PingMenuBarStyle(rawValue: "dot") == .dot
                         && PingMenuBarStyle(rawValue: "bars") == nil,
                      "the menu bar ping style has a graph and a dot mode")
