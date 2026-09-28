@@ -63,50 +63,56 @@ enum PingTrackerTests {
         var tracker = PingTracker()
         suite.expect(tracker.state == .unknown, "a new target is unknown")
 
-        _ = tracker.sent(sequence: 1, at: 0)
+        tracker.sent(sequence: 1, at: 0)
         let up = tracker.received(sequence: 1, at: 0.02)
-        suite.expect(up?.state == .up && up?.stateChanged == true && up?.probeNow == false,
-                     "the first reply brings the target up")
+        suite.expect(up?.state == .up && up?.stateChanged == true, "the first reply brings the target up")
         suite.expectClose(up?.sample.rtt ?? -1, 0.02, "the reply carries its round trip")
         suite.expect(tracker.received(sequence: 1, at: 0.03) == nil, "a duplicate reply is ignored")
         suite.expect(tracker.received(sequence: 99, at: 0.03) == nil, "a reply to nothing sent is ignored")
 
-        _ = tracker.sent(sequence: 2, at: 1)
-        let suspect = tracker.expired(sequence: 2, at: 1.3)
-        suite.expect(suspect?.state == .suspect && suspect?.stateChanged == true,
+        // One-second ticks: each tick drains, expires, then sends.
+        let timeout = tracker.sent(sequence: 2, at: 1)
+        suite.expect(tracker.expire(now: 1 + timeout - 0.01).isEmpty, "a probe is not lost before its timeout")
+        let suspect = tracker.expire(now: 2)
+        suite.expect(suspect.count == 1 && suspect.first?.state == .suspect && suspect.first?.stateChanged == true,
                      "one missed reply only makes the target suspect")
-        suite.expect(suspect?.probeNow == true, "a suspect target asks for an extra probe at once")
-        suite.expect(suspect?.sample.rtt == nil, "the miss is published as a lost sample")
-        suite.expect(tracker.expired(sequence: 2, at: 1.4) == nil, "a probe expires only once")
+        suite.expect(suspect.first?.sample.rtt == nil, "the miss is published as a lost sample")
+        suite.expect(tracker.expire(now: 2.5).isEmpty, "a probe expires only once")
 
-        _ = tracker.sent(sequence: 3, at: 1.3)
-        let down = tracker.expired(sequence: 3, at: 1.6)
-        suite.expect(down?.state == .down && down?.stateChanged == true && down?.probeNow == false,
+        tracker.sent(sequence: 3, at: 2)
+        let down = tracker.expire(now: 3)
+        suite.expect(down.first?.state == .down && down.first?.stateChanged == true,
                      "the second consecutive miss marks the target down")
 
-        _ = tracker.sent(sequence: 4, at: 2)
-        let stillDown = tracker.expired(sequence: 4, at: 2.3)
-        suite.expect(stillDown?.state == .down && stillDown?.stateChanged == false
-                         && stillDown?.probeNow == false,
-                     "further misses keep it down without extra probes")
+        tracker.sent(sequence: 4, at: 3)
+        let stillDown = tracker.expire(now: 4)
+        suite.expect(stillDown.first?.state == .down && stillDown.first?.stateChanged == false,
+                     "further misses keep it down")
 
-        _ = tracker.sent(sequence: 5, at: 3)
-        let recovered = tracker.received(sequence: 5, at: 3.015)
+        tracker.sent(sequence: 5, at: 4)
+        let recovered = tracker.received(sequence: 5, at: 4.015)
         suite.expect(recovered?.state == .up && recovered?.stateChanged == true,
                      "the next reply recovers a down target")
         suite.expect(tracker.consecutiveMisses == 0, "a reply clears the miss count")
 
-        _ = tracker.sent(sequence: 6, at: 4)
-        _ = tracker.expired(sequence: 6, at: 4.3)
-        _ = tracker.sent(sequence: 7, at: 4.3)
-        let saved = tracker.received(sequence: 7, at: 4.32)
+        tracker.sent(sequence: 6, at: 5)
+        _ = tracker.expire(now: 6)
+        tracker.sent(sequence: 7, at: 6)
+        let saved = tracker.received(sequence: 7, at: 6.02)
         suite.expect(saved?.state == .up && saved?.stateChanged == true,
-                     "an answered extra probe clears a suspect target without it going down")
+                     "a reply on the next tick clears a suspect target without it going down")
+
+        var batch = PingTracker()
+        batch.sent(sequence: 1, at: 0)
+        batch.sent(sequence: 2, at: 0.5)
+        let both = batch.expire(now: 10)
+        suite.expect(both.map(\.sample.sequence) == [1, 2] && both.last?.state == .down,
+                     "probes that expire in the same tick are judged oldest first")
 
         var unsent = PingTracker()
-        _ = unsent.sent(sequence: 1, at: 0)
+        unsent.sent(sequence: 1, at: 0)
         let failed = unsent.sendFailed(sequence: 1, at: 0)
-        suite.expect(failed.state == .suspect && failed.probeNow, "a send that fails counts as a miss at once")
+        suite.expect(failed.state == .suspect, "a send that fails counts as a miss at once")
         suite.expect(unsent.received(sequence: 1, at: 0.01) == nil, "a failed send expects no reply")
 
         var timed = PingTracker()
@@ -115,40 +121,50 @@ enum PingTrackerTests {
         _ = timed.received(sequence: 1, at: 0.01)
         suite.expect(timed.sent(sequence: 2, at: 1) < PingTimeoutEstimator.initialTimeout,
                      "later probes wait for a timeout learned from replies")
+
+        var slow = PingTracker()
+        for sequence in 0..<20 {
+            slow.sent(sequence: UInt16(sequence), at: Double(sequence))
+            _ = slow.received(sequence: UInt16(sequence), at: Double(sequence) + 1.4)
+        }
+        slow.sent(sequence: 100, at: 100)
+        suite.expect(slow.expire(now: 101).isEmpty,
+                     "on a link slower than the tick, a probe survives the next tick")
+        suite.expect(slow.received(sequence: 100, at: 101.4)?.sample.late == false,
+                     "and its reply on the tick after is on time, not late")
     }
 
     private static func lateAndStaleReplies(_ suite: TestSuite) {
         var tracker = PingTracker()
-        _ = tracker.sent(sequence: 1, at: 0)
+        tracker.sent(sequence: 1, at: 0)
         _ = tracker.received(sequence: 1, at: 0.01)
-        _ = tracker.sent(sequence: 2, at: 1)
-        _ = tracker.expired(sequence: 2, at: 1.3)
-        let late = tracker.received(sequence: 2, at: 1.8)
+        tracker.sent(sequence: 2, at: 1)
+        _ = tracker.expire(now: 2)
+        let late = tracker.received(sequence: 2, at: 2.1)
         suite.expect(late?.state == .up && late?.sample.late == true,
                      "a late reply still proves the host is up and is marked late")
-        suite.expectClose(late?.sample.rtt ?? -1, 0.8, "a late reply keeps its true round trip")
+        suite.expectClose(late?.sample.rtt ?? -1, 1.1, "a late reply keeps its true round trip")
         suite.expect((tracker.estimator.smoothedRTT ?? 0) > 0.01,
                      "a late reply teaches the estimator that replies can take longer")
 
         var overlap = PingTracker()
-        _ = overlap.sent(sequence: 1, at: 0)
-        _ = overlap.sent(sequence: 2, at: 1)
+        overlap.sent(sequence: 1, at: 0)
+        overlap.sent(sequence: 2, at: 1)
         _ = overlap.received(sequence: 2, at: 1.02)
-        let stale = overlap.expired(sequence: 1, at: 1.1)
-        suite.expect(stale?.sample.rtt == nil && stale?.state == .up && stale?.stateChanged == false
-                         && stale?.probeNow == false,
+        let stale = overlap.expire(now: 2).first
+        suite.expect(stale?.sample.rtt == nil && stale?.state == .up && stale?.stateChanged == false,
                      "losing a probe older than one already answered does not make the target suspect")
         suite.expect(overlap.consecutiveMisses == 0, "a stale loss does not count as a miss")
 
         var crowded = PingTracker()
-        for sequence in 0..<200 { _ = crowded.sent(sequence: UInt16(sequence), at: Double(sequence) * 0.01) }
+        for sequence in 0..<200 { crowded.sent(sequence: UInt16(sequence), at: Double(sequence) * 0.01) }
         suite.expect(crowded.received(sequence: 0, at: 2.5) == nil,
                      "the oldest unanswered probes are forgotten once too many are waiting")
         suite.expect(crowded.received(sequence: 199, at: 2.5) != nil, "the newest probe is still matched")
 
         var old = PingTracker()
-        _ = old.sent(sequence: 1, at: 0)
-        _ = old.sent(sequence: 2, at: PingTracker.rememberedSeconds + 1)
+        old.sent(sequence: 1, at: 0)
+        old.sent(sequence: 2, at: PingTracker.rememberedSeconds + 1)
         suite.expect(old.received(sequence: 1, at: PingTracker.rememberedSeconds + 1.1) == nil,
                      "a reply after the remembered window is not matched")
     }
@@ -207,6 +223,30 @@ enum PingTrackerTests {
         suite.expect(ICMPEcho.parseReply(v6Reply, ipv6: true)
                          == ICMPEcho.Reply(identifier: 7, sequence: 9, payload: payload),
                      "an IPv6 reply arrives without an IP header")
+        func controlMessage(level: Int32, type: Int32, seconds: Int64, microseconds: Int32) -> [UInt8] {
+            var bytes: [UInt8] = []
+            func append<T>(_ value: T) { withUnsafeBytes(of: value) { bytes += $0 } }
+            append(UInt32(28)); append(level); append(type)
+            append(seconds); append(microseconds); append(Int32(0))
+            return bytes
+        }
+        let stamp = controlMessage(level: 0xffff, type: 2, seconds: 1_800_000_000, microseconds: 250_000)
+        suite.expectClose(ICMPEcho.kernelTimestamp(control: stamp, length: 28, level: 0xffff, type: 2) ?? 0,
+                          1_800_000_000.25, "the kernel receive stamp is read from the control message")
+        let other = controlMessage(level: 0xffff, type: 7, seconds: 1, microseconds: 0)
+        suite.expectClose(ICMPEcho.kernelTimestamp(control: other + stamp, length: 56, level: 0xffff, type: 2) ?? 0,
+                          1_800_000_000.25, "other control messages are skipped")
+        suite.expect(ICMPEcho.kernelTimestamp(control: stamp, length: 20, level: 0xffff, type: 2) == nil,
+                     "a truncated control buffer yields no stamp")
+        suite.expect(ICMPEcho.kernelTimestamp(control: [], length: 0, level: 0xffff, type: 2) == nil,
+                     "no control data yields no stamp")
+        suite.expectClose(ICMPEcho.uptime(ofWallTime: 99.6, uptime: 500, wallNow: 100), 499.6,
+                          "a reply stamped before the tick is placed back on the uptime clock")
+        suite.expectClose(ICMPEcho.uptime(ofWallTime: 101, uptime: 500, wallNow: 100), 500,
+                          "a stamp from the future falls back to the read time")
+        suite.expectClose(ICMPEcho.uptime(ofWallTime: 0, uptime: 500, wallNow: 100), 500,
+                          "a wall clock jump falls back to the read time")
+
         var neighbor = v6Reply
         neighbor[0] = 135
         suite.expect(ICMPEcho.parseReply(neighbor, ipv6: true) == nil, "other ICMPv6 messages are ignored")

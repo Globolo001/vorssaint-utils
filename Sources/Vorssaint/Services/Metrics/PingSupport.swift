@@ -52,9 +52,10 @@ struct PingHost: Hashable {
 
 /// Derives each probe's timeout from the replies seen so far, in the manner of
 /// TCP's retransmission timer (RFC 6298): a smoothed RTT plus four times its
-/// mean deviation. A steady 12 ms LAN host gets a timeout of a few hundred
-/// milliseconds, so a dead link shows within a second; a jittery satellite
-/// link gets room for its usual spikes instead of flapping.
+/// mean deviation. Probes are judged on the monitor's tick, so a timeout below
+/// the tick interval simply expires at the next tick; the estimate matters
+/// when replies take longer than a tick, where a jittery link gets room for
+/// its usual spikes instead of flapping.
 struct PingTimeoutEstimator {
     /// Nothing measured yet.
     static let initialTimeout: TimeInterval = 1
@@ -103,10 +104,11 @@ struct PingSample: Equatable {
 /// Reachability of one target, decided from its probes.
 ///
 /// One missing reply is not an outage: Wi-Fi drops a frame now and then. The
-/// first miss only makes the target suspect and asks for an extra probe right
-/// away, so the doubt is settled within one more timeout rather than a full
-/// probe interval later. A second consecutive miss marks it down. Any reply,
-/// even a late one, proves the host is there and brings it back up.
+/// first miss only makes the target suspect; a second consecutive miss marks
+/// it down. Any reply, even a late one, proves the host is there and brings it
+/// back up. `SystemMonitor` drives it once per sampling tick: replies queued
+/// since the last tick first, then the probes whose timeout ran out, then the
+/// next probe.
 ///
 /// Times are system uptime seconds, which stop while the Mac sleeps, the same
 /// clock `SustainedAlertGate` uses.
@@ -117,8 +119,6 @@ struct PingTracker {
         let sample: PingSample
         let state: State
         let stateChanged: Bool
-        /// Send one extra probe now instead of waiting for the next interval.
-        let probeNow: Bool
     }
 
     static let missesUntilDown = 2
@@ -132,6 +132,7 @@ struct PingTracker {
 
     private struct Probe {
         let sentAt: TimeInterval
+        let deadline: TimeInterval
         var expired: Bool
     }
     private var probes: [UInt16: Probe] = [:]
@@ -139,30 +140,36 @@ struct PingTracker {
     /// sent before it says nothing about the present.
     private var newestAnsweredSentAt: TimeInterval = -.infinity
 
-    /// Records a probe that just left and returns how long to wait for it.
+    /// Records a probe that just left and returns how long it may take.
+    @discardableResult
     mutating func sent(sequence: UInt16, at time: TimeInterval) -> TimeInterval {
         prune(now: time)
-        probes[sequence] = Probe(sentAt: time, expired: false)
-        return estimator.timeout
+        let timeout = estimator.timeout
+        probes[sequence] = Probe(sentAt: time, deadline: time + timeout, expired: false)
+        return timeout
     }
 
     /// A reply for `sequence`. `nil` for a duplicate or a reply to nothing sent.
     mutating func received(sequence: UInt16, at time: TimeInterval) -> Outcome? {
-        guard let probe = probes.removeValue(forKey: sequence), time >= probe.sentAt else { return nil }
+        guard let probe = probes[sequence], time >= probe.sentAt else { return nil }
+        probes.removeValue(forKey: sequence)
         let rtt = time - probe.sentAt
         estimator.observe(rtt: rtt)
         newestAnsweredSentAt = max(newestAnsweredSentAt, probe.sentAt)
         consecutiveMisses = 0
         let sample = PingSample(sequence: sequence, sentAt: probe.sentAt, rtt: rtt, late: probe.expired)
-        return transition(to: .up, sample: sample, probeNow: false)
+        return transition(to: .up, sample: sample)
     }
 
-    /// The probe's timeout ran out. `nil` when it was answered in the meantime.
-    mutating func expired(sequence: UInt16, at time: TimeInterval) -> Outcome? {
-        guard var probe = probes[sequence], !probe.expired else { return nil }
-        probe.expired = true
-        probes[sequence] = probe
-        return miss(sequence: sequence, sentAt: probe.sentAt)
+    /// Every unanswered probe whose timeout has run out by `now`, oldest
+    /// first. Each probe expires once; a reply after that still counts, late.
+    mutating func expire(now: TimeInterval) -> [Outcome] {
+        let due = probes.filter { !$0.value.expired && $0.value.deadline <= now }
+            .sorted { $0.value.sentAt < $1.value.sentAt }
+        return due.map { sequence, probe in
+            probes[sequence]?.expired = true
+            return miss(sequence: sequence, sentAt: probe.sentAt)
+        }
     }
 
     /// The probe could not even be sent (no route, interface down). That is
@@ -172,29 +179,21 @@ struct PingTracker {
         return miss(sequence: sequence, sentAt: time)
     }
 
-    /// Forget measurements, for example when the name resolves somewhere new.
-    mutating func reset() {
-        self = PingTracker()
-    }
-
     private mutating func miss(sequence: UInt16, sentAt: TimeInterval) -> Outcome {
         let sample = PingSample(sequence: sequence, sentAt: sentAt, rtt: nil, late: false)
         // A newer probe already came back: this loss is old news. It still
         // counts in the history, but not against the target's state.
         guard sentAt >= newestAnsweredSentAt else {
-            return Outcome(sample: sample, state: state, stateChanged: false, probeNow: false)
+            return Outcome(sample: sample, state: state, stateChanged: false)
         }
         consecutiveMisses += 1
-        if consecutiveMisses >= Self.missesUntilDown {
-            return transition(to: .down, sample: sample, probeNow: false)
-        }
-        return transition(to: .suspect, sample: sample, probeNow: true)
+        return transition(to: consecutiveMisses >= Self.missesUntilDown ? .down : .suspect, sample: sample)
     }
 
-    private mutating func transition(to next: State, sample: PingSample, probeNow: Bool) -> Outcome {
+    private mutating func transition(to next: State, sample: PingSample) -> Outcome {
         let changed = next != state
         state = next
-        return Outcome(sample: sample, state: next, stateChanged: changed, probeNow: probeNow)
+        return Outcome(sample: sample, state: next, stateChanged: changed)
     }
 
     private mutating func prune(now: TimeInterval) {
@@ -278,6 +277,46 @@ enum ICMPEcho {
         let sequence = UInt16(bytes[offset + 6]) << 8 | UInt16(bytes[offset + 7])
         return Reply(identifier: identifier, sequence: sequence,
                      payload: Array(bytes[(offset + headerLength)...]))
+    }
+
+    /// The receive time the kernel attached to a datagram (`SO_TIMESTAMP`),
+    /// read out of `recvmsg`'s control buffer. The monitor drains the socket
+    /// only once per tick, so this, not the time of the read, is when the
+    /// reply arrived. Layout per `<sys/socket.h>` on Darwin: a 12-byte
+    /// `cmsghdr` (length, level, type), data aligned to 4 bytes, and a 64-bit
+    /// `timeval` (seconds, then microseconds).
+    static func kernelTimestamp(control: [UInt8], length: Int,
+                                level: Int32, type: Int32) -> TimeInterval? {
+        let end = min(length, control.count)
+        let headerLength = 12
+        func aligned(_ value: Int) -> Int { (value + 3) & ~3 }
+        return control.withUnsafeBytes { raw -> TimeInterval? in
+            var offset = 0
+            while offset + headerLength <= end {
+                let messageLength = Int(raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self))
+                guard messageLength >= headerLength, offset + messageLength <= end else { return nil }
+                let messageLevel = raw.loadUnaligned(fromByteOffset: offset + 4, as: Int32.self)
+                let messageType = raw.loadUnaligned(fromByteOffset: offset + 8, as: Int32.self)
+                let data = offset + aligned(headerLength)
+                if messageLevel == level, messageType == type, data + 12 <= offset + messageLength {
+                    let seconds = raw.loadUnaligned(fromByteOffset: data, as: Int64.self)
+                    let microseconds = raw.loadUnaligned(fromByteOffset: data + 8, as: Int32.self)
+                    return TimeInterval(seconds) + TimeInterval(microseconds) / 1_000_000
+                }
+                offset += aligned(messageLength)
+            }
+            return nil
+        }
+    }
+
+    /// Kernel timestamps are wall-clock time; the tracker runs on uptime.
+    /// The two are read together at drain time, and a wall clock that jumped
+    /// in between (or a timestamp from the future) falls back to now.
+    static func uptime(ofWallTime wall: TimeInterval, uptime: TimeInterval,
+                       wallNow: TimeInterval) -> TimeInterval {
+        let age = wallNow - wall
+        guard age >= 0, age < 60 else { return uptime }
+        return uptime - age
     }
 
     /// The Internet checksum (RFC 1071). Over a packet that already carries
