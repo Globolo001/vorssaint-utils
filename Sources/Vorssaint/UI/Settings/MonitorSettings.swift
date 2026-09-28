@@ -54,6 +54,9 @@ struct MonitorSettings: View {
                 }
                 alertsCard
                 panelCard
+                if AppFeature.monitorNetwork.isAvailable {
+                    pingCard
+                }
                 if AppFeature.fanControl.isAvailable {
                     fanControlCard
                         .settingsSectionAnchor(.fanControl, cornerRadius: 16)
@@ -198,6 +201,12 @@ struct MonitorSettings: View {
     private var alertsCard: some View {
         SettingsCard(title: FeatureStrings.monitorAlerts(l10n.language).section) {
             MonitorAlertsControls(compact: false)
+        }
+    }
+
+    private var pingCard: some View {
+        SettingsCard(title: FeatureStrings.ping(l10n.language).title) {
+            PingTargetsList()
         }
     }
 
@@ -499,9 +508,6 @@ private struct PingMenuBarOrderOption: View {
                 .pickerStyle(.menu)
                 .controlSize(.small)
             }
-        }
-        if menuBarPing {
-            PingTargetsList()
         }
     }
 
