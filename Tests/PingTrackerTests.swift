@@ -295,10 +295,13 @@ enum PingTrackerTests {
         suite.expect(PingFormat.menuBarValue(0.0146) == "15" && PingFormat.menuBarValue(0.0042) == "4",
                      "the menu bar value is whole milliseconds without a unit")
         suite.expect(PingFormat.menuBarValue(0.0002) == "<1", "a sub-millisecond reply never reads as zero")
-        suite.expect(PingFormat.menuBarValue(0.9994) == "999" && PingFormat.menuBarValue(1.2) == ">1s",
-                     "the menu bar value is capped at three digits")
-        suite.expect([0.0001, 0.0042, 0.0999, 0.5, 0.9994, 3.0].allSatisfy { PingFormat.menuBarValue($0).count <= 3 },
-                     "every menu bar value fits three characters")
+        suite.expect(PingFormat.menuBarValue(1.2) == "1200" && PingFormat.menuBarValue(9.9994) == "9999",
+                     "the menu bar value stays whole milliseconds up to four digits")
+        suite.expect(PingFormat.menuBarValue(9.9996) == "10k" && PingFormat.menuBarValue(12.7) == "12k"
+                        && PingFormat.menuBarValue(30) == "30k",
+                     "from ten seconds the menu bar value is abbreviated in thousands")
+        suite.expect([0.0001, 0.0042, 0.0999, 0.5, 0.9994, 3.0, 9.9994, 29.9, 99.9].allSatisfy { PingFormat.menuBarValue($0).count <= 4 },
+                     "every menu bar value fits four characters")
         suite.expect(PingFormat.menuBarLabel == "PING", "the menu bar label carries no unit")
         suite.expect(PingFormat.menuBarReserves.contains(PingFormat.menuBarDown),
                      "the down mark fits the reserved value column")

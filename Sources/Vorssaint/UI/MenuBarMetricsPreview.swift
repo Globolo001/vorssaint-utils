@@ -283,7 +283,7 @@ struct MenuBarMetricsPreview: View {
                               weight: .semibold,
                               design: .monospaced))
                 .foregroundStyle(state == .down ? Color.red : state == .suspect ? Color.white.opacity(0.55) : Color.white)
-                .frame(minWidth: style == .readable ? 24 : 22, alignment: .trailing)
+                .frame(minWidth: style == .readable ? 32 : 29, alignment: .trailing)
                 .overlay(alignment: .bottom) {
                     if state != .unknown {
                         PingUnderline()
