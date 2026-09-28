@@ -16,12 +16,14 @@ struct PingFeatureStrings {
     let loss: String
     let remove: String
     let invalidTarget: String
-    let measuring: String
     let targetsTitle: String
     let otherTarget: String
     let targetsCaption: String
     let menuBarTarget: String
     let noTargets: String
+    let displayLabel: String
+    let displayGraph: String
+    let displayDot: String
 }
 
 extension FeatureStrings {
@@ -60,12 +62,14 @@ extension PingFeatureStrings {
         loss: "Loss",
         remove: "Remove",
         invalidTarget: "Enter a host, domain or IP address",
-        measuring: "Measuring…",
         targetsTitle: "Ping targets",
         otherTarget: "Other host…",
         targetsCaption: "Pinged while the Ping block is shown in the panel or the Ping menu bar item is on.",
         menuBarTarget: "Ping target",
-        noTargets: "No ping targets"
+        noTargets: "No ping targets",
+        displayLabel: "Ping display",
+        displayGraph: "Graph",
+        displayDot: "Status dot"
     )
 
     static let ptBR = PingFeatureStrings(
@@ -81,12 +85,14 @@ extension PingFeatureStrings {
         loss: "Perda",
         remove: "Remover",
         invalidTarget: "Digite um host, domínio ou endereço IP",
-        measuring: "Medindo…",
         targetsTitle: "Destinos de ping",
         otherTarget: "Outro host…",
         targetsCaption: "Recebem ping enquanto o bloco Ping aparece no painel ou o item Ping da barra de menus está ativo.",
         menuBarTarget: "Destino do ping",
-        noTargets: "Nenhum destino de ping"
+        noTargets: "Nenhum destino de ping",
+        displayLabel: "Exibição do ping",
+        displayGraph: "Gráfico",
+        displayDot: "Ponto de status"
     )
 
     static let tr = PingFeatureStrings(
@@ -102,12 +108,14 @@ extension PingFeatureStrings {
         loss: "Kayıp",
         remove: "Kaldır",
         invalidTarget: "Bir ana makine, alan adı veya IP adresi girin",
-        measuring: "Ölçülüyor…",
         targetsTitle: "Ping hedefleri",
         otherTarget: "Başka ana makine…",
         targetsCaption: "Ping bloğu panelde gösterilirken veya Ping menü çubuğu öğesi açıkken pinglenir.",
         menuBarTarget: "Ping hedefi",
-        noTargets: "Ping hedefi yok"
+        noTargets: "Ping hedefi yok",
+        displayLabel: "Ping görünümü",
+        displayGraph: "Grafik",
+        displayDot: "Durum noktası"
     )
 
     static let ru = PingFeatureStrings(
@@ -123,12 +131,14 @@ extension PingFeatureStrings {
         loss: "Потери",
         remove: "Удалить",
         invalidTarget: "Введите хост, домен или IP-адрес",
-        measuring: "Измерение…",
         targetsTitle: "Узлы для пинга",
         otherTarget: "Другой хост…",
         targetsCaption: "Пингуются, пока блок «Пинг» показан на панели или включён пункт «Пинг» в строке меню.",
         menuBarTarget: "Узел для пинга",
-        noTargets: "Нет узлов для пинга"
+        noTargets: "Нет узлов для пинга",
+        displayLabel: "Отображение пинга",
+        displayGraph: "График",
+        displayDot: "Индикатор состояния"
     )
 
     static let es = PingFeatureStrings(
@@ -144,12 +154,14 @@ extension PingFeatureStrings {
         loss: "Pérdida",
         remove: "Eliminar",
         invalidTarget: "Introduce un host, dominio o dirección IP",
-        measuring: "Midiendo…",
         targetsTitle: "Destinos de ping",
         otherTarget: "Otro host…",
         targetsCaption: "Se hace ping mientras el bloque Ping se muestra en el panel o el elemento Ping de la barra de menús está activado.",
         menuBarTarget: "Destino del ping",
-        noTargets: "No hay destinos de ping"
+        noTargets: "No hay destinos de ping",
+        displayLabel: "Visualización del ping",
+        displayGraph: "Gráfico",
+        displayDot: "Punto de estado"
     )
 
     static let sk = PingFeatureStrings(
@@ -165,12 +177,14 @@ extension PingFeatureStrings {
         loss: "Strata",
         remove: "Odstrániť",
         invalidTarget: "Zadajte hostiteľa, doménu alebo IP adresu",
-        measuring: "Meria sa…",
         targetsTitle: "Ciele pingu",
         otherTarget: "Iný hostiteľ…",
         targetsCaption: "Pingujú sa, kým je blok Ping zobrazený na paneli alebo je zapnutá položka Ping v lište ponúk.",
         menuBarTarget: "Cieľ pingu",
-        noTargets: "Žiadne ciele pingu"
+        noTargets: "Žiadne ciele pingu",
+        displayLabel: "Zobrazenie pingu",
+        displayGraph: "Graf",
+        displayDot: "Stavová bodka"
     )
 
     static let de = PingFeatureStrings(
@@ -186,12 +200,14 @@ extension PingFeatureStrings {
         loss: "Verlust",
         remove: "Entfernen",
         invalidTarget: "Host, Domain oder IP-Adresse eingeben",
-        measuring: "Wird gemessen…",
         targetsTitle: "Ping-Ziele",
         otherTarget: "Anderer Host…",
         targetsCaption: "Wird angepingt, solange der Ping-Block im Panel angezeigt wird oder das Ping-Element in der Menüleiste aktiv ist.",
         menuBarTarget: "Ping-Ziel",
-        noTargets: "Keine Ping-Ziele"
+        noTargets: "Keine Ping-Ziele",
+        displayLabel: "Ping-Anzeige",
+        displayGraph: "Diagramm",
+        displayDot: "Statuspunkt"
     )
 
     static let fr = PingFeatureStrings(
@@ -207,12 +223,14 @@ extension PingFeatureStrings {
         loss: "Perte",
         remove: "Supprimer",
         invalidTarget: "Saisissez un hôte, un domaine ou une adresse IP",
-        measuring: "Mesure…",
         targetsTitle: "Cibles du ping",
         otherTarget: "Autre hôte…",
         targetsCaption: "Pinguées tant que le bloc Ping est affiché dans le panneau ou que l’élément Ping de la barre des menus est activé.",
         menuBarTarget: "Cible du ping",
-        noTargets: "Aucune cible de ping"
+        noTargets: "Aucune cible de ping",
+        displayLabel: "Affichage du ping",
+        displayGraph: "Graphique",
+        displayDot: "Point d’état"
     )
 
     static let it = PingFeatureStrings(
@@ -228,12 +246,14 @@ extension PingFeatureStrings {
         loss: "Perdita",
         remove: "Rimuovi",
         invalidTarget: "Inserisci un host, un dominio o un indirizzo IP",
-        measuring: "Misurazione…",
         targetsTitle: "Destinazioni ping",
         otherTarget: "Altro host…",
         targetsCaption: "Ricevono il ping mentre il blocco Ping è visibile nel pannello o l’elemento Ping della barra dei menu è attivo.",
         menuBarTarget: "Destinazione ping",
-        noTargets: "Nessuna destinazione ping"
+        noTargets: "Nessuna destinazione ping",
+        displayLabel: "Visualizzazione ping",
+        displayGraph: "Grafico",
+        displayDot: "Punto di stato"
     )
 
     static let ja = PingFeatureStrings(
@@ -249,12 +269,14 @@ extension PingFeatureStrings {
         loss: "損失",
         remove: "削除",
         invalidTarget: "ホスト、ドメイン、またはIPアドレスを入力してください",
-        measuring: "計測中…",
         targetsTitle: "Ping の宛先",
         otherTarget: "その他のホスト…",
         targetsCaption: "パネルに Ping ブロックが表示されているか、メニューバーの Ping 項目がオンのときに Ping を送信します。",
         menuBarTarget: "Ping の宛先",
-        noTargets: "Ping の宛先がありません"
+        noTargets: "Ping の宛先がありません",
+        displayLabel: "Ping 表示",
+        displayGraph: "グラフ",
+        displayDot: "状態ドット"
     )
 
     static let ko = PingFeatureStrings(
@@ -270,12 +292,14 @@ extension PingFeatureStrings {
         loss: "손실",
         remove: "제거",
         invalidTarget: "호스트, 도메인 또는 IP 주소를 입력하세요",
-        measuring: "측정 중…",
         targetsTitle: "핑 대상",
         otherTarget: "다른 호스트…",
         targetsCaption: "패널에 핑 블록이 표시되거나 메뉴 막대의 핑 항목이 켜져 있는 동안 핑을 보냅니다.",
         menuBarTarget: "핑 대상",
-        noTargets: "핑 대상 없음"
+        noTargets: "핑 대상 없음",
+        displayLabel: "핑 표시",
+        displayGraph: "그래프",
+        displayDot: "상태 점"
     )
 
     static let zhHans = PingFeatureStrings(
@@ -291,12 +315,14 @@ extension PingFeatureStrings {
         loss: "丢包",
         remove: "移除",
         invalidTarget: "请输入主机、域名或 IP 地址",
-        measuring: "正在测量…",
         targetsTitle: "Ping 目标",
         otherTarget: "其他主机…",
         targetsCaption: "在面板中显示 Ping 模块或菜单栏中的 Ping 项目开启时进行 Ping。",
         menuBarTarget: "Ping 目标",
-        noTargets: "没有 Ping 目标"
+        noTargets: "没有 Ping 目标",
+        displayLabel: "Ping 显示",
+        displayGraph: "图表",
+        displayDot: "状态圆点"
     )
 
     static let zhTW = PingFeatureStrings(
@@ -312,12 +338,14 @@ extension PingFeatureStrings {
         loss: "遺失",
         remove: "移除",
         invalidTarget: "請輸入主機、網域或 IP 位址",
-        measuring: "正在測量…",
         targetsTitle: "Ping 目標",
         otherTarget: "其他主機…",
         targetsCaption: "在面板中顯示 Ping 區塊或選單列中的 Ping 項目開啟時進行 Ping。",
         menuBarTarget: "Ping 目標",
-        noTargets: "沒有 Ping 目標"
+        noTargets: "沒有 Ping 目標",
+        displayLabel: "Ping 顯示",
+        displayGraph: "圖表",
+        displayDot: "狀態圓點"
     )
 
     static let zhHK = PingFeatureStrings(
@@ -333,12 +361,14 @@ extension PingFeatureStrings {
         loss: "遺失",
         remove: "移除",
         invalidTarget: "請輸入主機、網域或 IP 位址",
-        measuring: "正在測量…",
         targetsTitle: "Ping 目標",
         otherTarget: "其他主機…",
         targetsCaption: "在面板中顯示 Ping 區塊或選單列中的 Ping 項目開啟時進行 Ping。",
         menuBarTarget: "Ping 目標",
-        noTargets: "沒有 Ping 目標"
+        noTargets: "沒有 Ping 目標",
+        displayLabel: "Ping 顯示",
+        displayGraph: "圖表",
+        displayDot: "狀態圓點"
     )
 
     static let uk = PingFeatureStrings(
@@ -354,11 +384,13 @@ extension PingFeatureStrings {
         loss: "Втрати",
         remove: "Вилучити",
         invalidTarget: "Введіть хост, домен або IP-адресу",
-        measuring: "Вимірювання…",
         targetsTitle: "Вузли для пінгу",
         otherTarget: "Інший хост…",
         targetsCaption: "Пінгуються, поки блок «Пінг» показано на панелі або ввімкнено пункт «Пінг» у рядку меню.",
         menuBarTarget: "Вузол для пінгу",
-        noTargets: "Немає вузлів для пінгу"
+        noTargets: "Немає вузлів для пінгу",
+        displayLabel: "Відображення пінгу",
+        displayGraph: "Графік",
+        displayDot: "Індикатор стану"
     )
 }

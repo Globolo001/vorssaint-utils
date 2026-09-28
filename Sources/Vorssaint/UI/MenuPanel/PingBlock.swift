@@ -51,18 +51,19 @@ struct PingBlock: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Text(strings.title)
-                        .font(.system(size: 10))
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
-                    if hosts.isEmpty {
-                        statusText(strings.noTargets)
-                    }
                     if editing {
                         PanelInlineHideButton(isVisible: $isVisible)
                     }
                 }
-                ForEach(hosts, id: \.self) { host in
-                    row(host)
+                if hosts.isEmpty {
+                    statusText(strings.noTargets)
+                } else {
+                    ForEach(hosts, id: \.self) { host in
+                        row(host)
+                    }
                 }
             }
         }
@@ -122,17 +123,10 @@ struct PingBlock: View {
         }
     }
 
-    @ViewBuilder
     private func statusDot(_ reading: PingReading?) -> some View {
-        if reading?.state == .suspect {
-            Circle()
-                .strokeBorder(PanelMetricColor.yellow(for: colorScheme), lineWidth: 1.5)
-                .frame(width: 7, height: 7)
-        } else {
-            Circle()
-                .fill(dotColor(reading))
-                .frame(width: 7, height: 7)
-        }
+        Circle()
+            .fill(dotColor(reading))
+            .frame(width: 7, height: 7)
     }
 
     private func dotColor(_ reading: PingReading?) -> Color {
@@ -178,11 +172,11 @@ struct PingBlock: View {
                     }
                     .foregroundStyle(reading.state == .suspect ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 } else {
-                    statusText(strings.measuring)
+                    statusText(l10n.s.networkMeasuring)
                 }
             }
         } else {
-            statusText(strings.measuring)
+            statusText(l10n.s.networkMeasuring)
         }
     }
 

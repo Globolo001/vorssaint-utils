@@ -125,6 +125,14 @@ struct PingReading: Equatable {
     }
 }
 
+enum PingMenuBarStyle: String, CaseIterable {
+    case graph, dot
+
+    static var current: PingMenuBarStyle {
+        PingMenuBarStyle(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.menuBarPingStyle) ?? "") ?? .graph
+    }
+}
+
 enum PingFormat {
     static func milliseconds(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "–" }
@@ -133,9 +141,14 @@ enum PingFormat {
             : String(format: "%.0f", locale: MetricFormat.locale, value.rounded())
     }
 
+    static let menuBarReserve = "888ms"
+
     static func menuBarValue(_ seconds: TimeInterval?) -> String {
-        guard let seconds else { return "–" }
-        return milliseconds(seconds * 1000) + "ms"
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return "–" }
+        let value = seconds * 1000
+        if value < 9.95 { return String(format: "%.1f", locale: MetricFormat.locale, value) + "ms" }
+        if value < 999.5 { return String(format: "%.0f", locale: MetricFormat.locale, value.rounded()) + "ms" }
+        return ">1s"
     }
 
     static func percent(_ ratio: Double) -> String {

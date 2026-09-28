@@ -237,6 +237,16 @@ enum PingTrackerTests {
         suite.expect(PingFormat.milliseconds(3.24) == "3.2", "fast round trips keep one decimal")
         suite.expect(PingFormat.milliseconds(14.6) == "15", "slower round trips are whole milliseconds")
         suite.expect(PingFormat.menuBarValue(0.0146) == "15ms", "the menu bar value is compact")
+        suite.expect(PingFormat.menuBarValue(0.00996) == "10ms" && PingFormat.menuBarValue(0.0042) == "4.2ms",
+                     "the menu bar value never grows a decimal past two digits")
+        suite.expect(PingFormat.menuBarValue(0.9994) == "999ms" && PingFormat.menuBarValue(1.2) == ">1s",
+                     "the menu bar value is capped at three digits")
+        let reserve = PingFormat.menuBarReserve.count
+        suite.expect([0.0001, 0.0042, 0.0999, 0.5, 0.9994, 3.0].allSatisfy { PingFormat.menuBarValue($0).count <= reserve },
+                     "every menu bar value fits the reserved width")
+        suite.expect(PingMenuBarStyle(rawValue: "graph") == .graph && PingMenuBarStyle(rawValue: "dot") == .dot
+                        && PingMenuBarStyle(rawValue: "bars") == nil,
+                     "the menu bar ping style has a graph and a dot mode")
         suite.expect(PingFormat.menuBarValue(nil) == "–", "no reply yet reads as a dash")
         suite.expect(PingFormat.percent(0) == "0%" && PingFormat.percent(0.005) == "0.5%" && PingFormat.percent(0.25) == "25%",
                      "loss keeps a decimal only below one percent")

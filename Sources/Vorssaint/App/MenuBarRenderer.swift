@@ -203,7 +203,7 @@ enum MenuBarSegment {
     case metricBlock(label: String, value: String, minimumValue: String, style: MenuBarBlockStyle, pressure: MemoryPressure?)
     case usageBarBlock(label: String, fraction: Double?, style: MenuBarBlockStyle, pressure: MemoryPressure?)
     case networkBlock(down: String, up: String, style: MenuBarBlockStyle)
-    case pingBlock(label: String, value: String, graph: [Double], state: PingTracker.State, style: MenuBarBlockStyle)
+    case pingBlock(label: String, value: String, graph: [Double], state: PingTracker.State, mode: PingMenuBarStyle, style: MenuBarBlockStyle)
     case diskActivityBlock(read: String, write: String, style: MenuBarBlockStyle)
     case batteryBlock(percent: Int, isCharging: Bool, style: MenuBarBlockStyle)
     case dot(MemoryPressure)
@@ -620,10 +620,12 @@ enum MenuBarRenderer {
                 }
             case .ping:
                 if let reading = pingReading(in: snapshot) {
+                    let mode = PingMenuBarStyle.current
                     groups.append([.pingBlock(label: "PING",
                                               value: pingValue(for: reading),
-                                              graph: Array(reading.graphValues.suffix(pingGraphSamples)),
+                                              graph: mode == .graph ? Array(reading.graphValues.suffix(pingGraphSamples)) : [],
                                               state: reading.isUnreachable ? .down : reading.state,
+                                              mode: mode,
                                               style: style)])
                 }
             case .diskUsage:
@@ -889,8 +891,8 @@ enum MenuBarRenderer {
                                                       pressure: pressure))
             case let .networkBlock(down, up, style):
                 result.append(networkBlockAttachment(down: down, up: up, style: style))
-            case let .pingBlock(label, value, graph, state, style):
-                result.append(pingBlockAttachment(label: label, value: value, graph: graph, state: state, style: style))
+            case let .pingBlock(label, value, graph, state, mode, style):
+                result.append(pingBlockAttachment(label: label, value: value, graph: graph, state: state, mode: mode, style: style))
             case let .diskActivityBlock(read, write, style):
                 result.append(diskActivityBlockAttachment(read: read, write: write, style: style))
             case let .batteryBlock(percent, isCharging, style):
@@ -988,8 +990,9 @@ enum MenuBarRenderer {
                                             value: String,
                                             graph: [Double],
                                             state: PingTracker.State,
+                                            mode: PingMenuBarStyle,
                                             style: MenuBarBlockStyle) -> NSAttributedString {
-        let image = pingBlockImage(label: label, value: value, graph: graph, state: state, style: style)
+        let image = pingBlockImage(label: label, value: value, graph: graph, state: state, mode: mode, style: style)
         let attachment = NSTextAttachment()
         attachment.image = image
         attachment.bounds = NSRect(x: 0,
@@ -1189,41 +1192,69 @@ enum MenuBarRenderer {
                                  style: style)
     }
 
-    static let pingGraphSamples = 30
+    static let pingGraphSamples = 24
 
     static func pingGraphSize(style: MenuBarBlockStyle) -> CGSize {
-        CGSize(width: style == .readable ? 28 : 25, height: style == .readable ? 13 : 12)
+        CGSize(width: style == .readable ? 20 : 18, height: style == .readable ? 13 : 12)
+    }
+
+    static func pingDotDiameter(style: MenuBarBlockStyle) -> CGFloat {
+        style == .readable ? 5.2 : 4.8
+    }
+
+    static func pingPressure(_ state: PingTracker.State) -> MemoryPressure {
+        switch state {
+        case .up: return .normal
+        case .suspect: return .warning
+        case .down: return .critical
+        case .unknown: return .unknown
+        }
     }
 
     private static func pingBlockImage(label: String,
                                        value: String,
                                        graph: [Double],
                                        state: PingTracker.State,
+                                       mode: PingMenuBarStyle,
                                        style: MenuBarBlockStyle) -> NSImage {
+        let downText = FeatureStrings.ping(L10n.shared.language).menuBarDown
         let graphKey = graph.map { $0.isFinite ? String(Int($0.rounded())) : "x" }.joined(separator: ",")
-        let cacheKey = "ping|\(label)|\(value)|\(state)|\(style)|\(graphKey)" as NSString
+        let cacheKey = "ping|\(label)|\(value)|\(downText)|\(state)|\(mode)|\(style)|\(graphKey)" as NSString
         if let cached = blockImageCache.object(forKey: cacheKey) { return cached }
 
         let labelFont = NSFont.systemFont(ofSize: style == .readable ? 7.2 : 6.6, weight: .medium)
         let valueFont = NSFont.monospacedDigitSystemFont(ofSize: style == .readable ? 13.0 : 12.0,
                                                          weight: .semibold)
+        let valueSizing: [NSAttributedString.Key: Any] = [.font: valueFont]
         let labelSize = (label as NSString).size(withAttributes: [.font: labelFont])
-        let valueSize = (value as NSString).size(withAttributes: [.font: valueFont])
-        let reservedSize = ("99.9ms" as NSString).size(withAttributes: [.font: valueFont])
-        let textWidth = max(labelSize.width, valueSize.width, reservedSize.width)
+        let valueSize = (value as NSString).size(withAttributes: valueSizing)
+        let reservedWidth = max((PingFormat.menuBarReserve as NSString).size(withAttributes: valueSizing).width,
+                                (downText as NSString).size(withAttributes: valueSizing).width)
+        let textWidth = max(labelSize.width, reservedWidth)
         let graphSize = pingGraphSize(style: style)
-        let gap: CGFloat = 4
-        let width = ceil(graphSize.width + gap + textWidth + (style == .readable ? 2 : 0.5))
+        let markWidth = mode == .graph ? graphSize.width : pingDotDiameter(style: style)
+        let gap: CGFloat = mode == .graph ? 3 : 4
+        let width = ceil(markWidth + gap + textWidth + (style == .readable ? 2 : 0.5))
         let height: CGFloat = style == .readable ? 23 : 21
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             NSColor.clear.setFill()
             rect.fill()
-            let graphRect = NSRect(x: 0,
-                                   y: (height - graphSize.height) / 2 - 1,
-                                   width: graphSize.width,
-                                   height: graphSize.height)
-            drawPingGraph(graph, in: graphRect, state: state)
-            let textX = graphSize.width + gap
+            switch mode {
+            case .graph:
+                let graphRect = NSRect(x: 0,
+                                       y: (height - graphSize.height) / 2 - 1,
+                                       width: graphSize.width,
+                                       height: graphSize.height)
+                drawPingGraph(graph, in: graphRect, state: state)
+            case .dot:
+                let diameter = pingDotDiameter(style: style)
+                nsColor(for: pingPressure(state)).setFill()
+                NSBezierPath(ovalIn: NSRect(x: 0,
+                                            y: style == .readable ? 4.1 : 3.5,
+                                            width: diameter,
+                                            height: diameter)).fill()
+            }
+            let textX = markWidth + gap
             (label as NSString).draw(at: NSPoint(x: textX + (textWidth - labelSize.width) / 2,
                                                  y: style == .readable ? 12.9 : 12.0),
                                      withAttributes: dynamicTextAttributes(font: labelFont))

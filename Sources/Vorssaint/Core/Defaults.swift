@@ -367,6 +367,7 @@ enum DefaultsKey {
     static let menuBarFanSpeed = "menuBarFanSpeed"
     static let menuBarPing = "menuBarPing"
     static let menuBarPingTarget = "menuBarPingTarget"
+    static let menuBarPingStyle = "menuBarPingStyle"
     static let pingTargets = "pingTargets"
     static let menuBarPreset = "menuBarPreset"           // dense
     static let menuBarMetricSpacing = "menuBarMetricSpacing" // standard | compact
@@ -1456,6 +1457,7 @@ enum Defaults {
         DefaultsKey.menuBarFanSpeed: false,
         DefaultsKey.menuBarPing: false,
         DefaultsKey.menuBarPingTarget: PingTargets.defaultMenuBarTarget,
+        DefaultsKey.menuBarPingStyle: PingMenuBarStyle.graph.rawValue,
         DefaultsKey.pingTargets: PingTargets.defaultList,
         DefaultsKey.menuBarPreset: "dense",
         DefaultsKey.menuBarMetricSpacing: "compact",  // owner's call: compact by default in 3.1.8
