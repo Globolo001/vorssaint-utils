@@ -1223,21 +1223,19 @@ enum MenuBarRenderer {
         let valueSizing: [NSAttributedString.Key: Any] = [.font: valueFont]
         let labelSize = (label as NSString).size(withAttributes: [.font: labelFont])
         let valueSize = (value as NSString).size(withAttributes: valueSizing)
-        let columnWidth = max(labelSize.width, PingFormat.menuBarReserves
+        let graphSize = pingGraphSize(style: style)
+        let dotDiameter: CGFloat = mode == .status ? (style == .readable ? 4.8 : 4.4) : 0
+        let dotGap: CGFloat = mode == .status ? 2.2 : 0
+        let headerWidth = labelSize.width + dotGap + dotDiameter
+        let columnWidth = max(headerWidth, PingFormat.menuBarReserves
             .map { ($0 as NSString).size(withAttributes: valueSizing).width }
             .max() ?? 0)
-        let graphSize = pingGraphSize(style: style)
-        let dotDiameter: CGFloat = style == .readable ? 5.2 : 4.8
-        let dotGap: CGFloat = 4
         let leading: CGFloat = mode == .graph ? graphSize.width + 3 : 0
-        let trailing: CGFloat = mode == .status ? dotGap + dotDiameter : 0
-        let groupWidth = leading + columnWidth + trailing
-        let width = ceil(groupWidth + (style == .readable ? 2 : 0.5))
+        let width = ceil(leading + columnWidth + (style == .readable ? 2 : 0.5))
         let height: CGFloat = style == .readable ? 23 : 21
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             NSColor.clear.setFill()
             rect.fill()
-            let groupX = (width - groupWidth) / 2
             if mode == .graph {
                 let graphRect = NSRect(x: 0,
                                        y: (height - graphSize.height) / 2 - 1,
@@ -1245,22 +1243,22 @@ enum MenuBarRenderer {
                                        height: graphSize.height)
                 drawPingGraph(graph, in: graphRect, state: state)
             }
-            let columnX = mode == .graph ? leading + (width - leading - columnWidth) / 2 : groupX
-            (label as NSString).draw(at: NSPoint(x: columnX + (columnWidth - labelSize.width) / 2,
-                                                 y: style == .readable ? 12.9 : 12.0),
+            let columnX = leading + (width - leading - columnWidth) / 2
+            let labelX = columnX + (columnWidth - headerWidth) / 2
+            let labelY: CGFloat = style == .readable ? 12.9 : 12.0
+            (label as NSString).draw(at: NSPoint(x: labelX, y: labelY),
                                      withAttributes: dynamicTextAttributes(font: labelFont))
-            let valueX = mode == .status
-                ? columnX + columnWidth - valueSize.width
-                : columnX + (columnWidth - valueSize.width) / 2
-            (value as NSString).draw(at: NSPoint(x: valueX, y: style == .readable ? -0.4 : -0.8),
-                                     withAttributes: dynamicTextAttributes(font: valueFont))
             if mode == .status {
+                let capMiddle = labelY - labelFont.descender + labelFont.capHeight / 2
                 nsColor(for: pingPressure(state)).setFill()
-                NSBezierPath(ovalIn: NSRect(x: columnX + columnWidth + dotGap,
-                                            y: style == .readable ? 4.1 : 3.5,
+                NSBezierPath(ovalIn: NSRect(x: labelX + labelSize.width + dotGap,
+                                            y: capMiddle - dotDiameter / 2,
                                             width: dotDiameter,
                                             height: dotDiameter)).fill()
             }
+            (value as NSString).draw(at: NSPoint(x: columnX + (columnWidth - valueSize.width) / 2,
+                                                 y: style == .readable ? -0.4 : -0.8),
+                                     withAttributes: dynamicTextAttributes(font: valueFont))
             return true
         }
         image.isTemplate = false

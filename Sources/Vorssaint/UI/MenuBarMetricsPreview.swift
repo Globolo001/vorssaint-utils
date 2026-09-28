@@ -199,15 +199,10 @@ struct MenuBarMetricsPreview: View {
                         .frame(width: MenuBarRenderer.pingGraphSize(style: style).width,
                                height: MenuBarRenderer.pingGraphSize(style: style).height)
                 }
-                pingBlock(label: label, value: value, trailing: mode == .status, style: style)
-                if mode == .status {
-                    Circle()
-                        .fill(dotColor(MenuBarRenderer.pingPressure(state)))
-                        .frame(width: style == .readable ? 5.2 : 4.8,
-                               height: style == .readable ? 5.2 : 4.8)
-                        .padding(.leading, 1)
-                        .offset(y: style == .readable ? 3.5 : 3)
-                }
+                pingBlock(label: label,
+                          value: value,
+                          pressure: mode == .status ? MenuBarRenderer.pingPressure(state) : nil,
+                          style: style)
             }
             .fixedSize(horizontal: true, vertical: true)
         case let .diskActivityBlock(read, write, style):
@@ -281,16 +276,24 @@ struct MenuBarMetricsPreview: View {
 
     private func pingBlock(label: String,
                            value: String,
-                           trailing: Bool,
+                           pressure: MemoryPressure?,
                            style: MenuBarBlockStyle) -> some View {
         VStack(spacing: -1) {
-            Text(label)
-                .font(.system(size: style == .readable ? 7.2 : 6.6, weight: .medium))
+            HStack(spacing: 2.2) {
+                Text(label)
+                    .font(.system(size: style == .readable ? 7.2 : 6.6, weight: .medium))
+                if let pressure {
+                    Circle()
+                        .fill(dotColor(pressure))
+                        .frame(width: style == .readable ? 4.8 : 4.4,
+                               height: style == .readable ? 4.8 : 4.4)
+                }
+            }
             Text(value)
                 .font(.system(size: style == .readable ? 13 : 12,
                               weight: .semibold,
                               design: .monospaced))
-                .frame(minWidth: style == .readable ? 39 : 36, alignment: trailing ? .trailing : .center)
+                .frame(minWidth: style == .readable ? 39 : 36, alignment: .center)
         }
         .foregroundStyle(.white)
         .fixedSize(horizontal: true, vertical: true)
