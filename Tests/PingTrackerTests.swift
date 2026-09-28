@@ -14,6 +14,7 @@ enum PingTrackerTests {
         targets(suite)
         readings(suite)
         strings(suite)
+        sendErrors(suite)
     }
 
     private static func hosts(_ suite: TestSuite) {
@@ -328,5 +329,29 @@ enum PingTrackerTests {
             LocalizationTests.check(FeatureStrings.ping(language), against: english,
                                     name: "ping/\(language.rawValue)", suite: suite)
         }
+    }
+
+    private static func sendErrors(_ suite: TestSuite) {
+        for code in [EPIPE, EBADF, ENOTSOCK, ENOTCONN, ECONNRESET, EDESTADDRREQ] {
+            suite.expect(PingSocketError.needsNewSocket(code), "send error \(code) replaces the socket")
+        }
+        for code in [EHOSTUNREACH, ENETUNREACH, ENETDOWN, EHOSTDOWN, ENOBUFS, EAGAIN, 0] {
+            suite.expect(!PingSocketError.needsNewSocket(code), "send error \(code) keeps the socket")
+        }
+
+        var tunnel = PingTracker()
+        tunnel.sent(sequence: 1, at: 0)
+        _ = tunnel.received(sequence: 1, at: 0.02)
+        var history = PingHistory()
+        for sequence in UInt16(2)...4 {
+            tunnel.sent(sequence: sequence, at: Double(sequence))
+            history.record(tunnel.sendFailed(sequence: sequence, at: Double(sequence)).sample)
+        }
+        suite.expect(tunnel.state == .down && history.lossRatio == 1,
+                     "repeated send failures mark each probe lost and the target down")
+        tunnel.sent(sequence: 5, at: 5)
+        let recovered = tunnel.received(sequence: 5, at: 5.03)
+        suite.expect(recovered?.state == .up && recovered?.stateChanged == true,
+                     "the target recovers on the first reply after send failures")
     }
 }

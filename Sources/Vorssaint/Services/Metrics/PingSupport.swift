@@ -303,6 +303,12 @@ struct PingHistory {
     }
 }
 
+enum PingSocketError {
+    static func needsNewSocket(_ code: Int32) -> Bool {
+        [EPIPE, EBADF, ENOTSOCK, ENOTCONN, ECONNRESET, EDESTADDRREQ].contains(code)
+    }
+}
+
 enum ICMPEcho {
     static let requestV4: UInt8 = 8
     static let replyV4: UInt8 = 0

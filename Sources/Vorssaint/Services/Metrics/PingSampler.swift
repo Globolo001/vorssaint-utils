@@ -42,6 +42,11 @@ final class PingSampler {
         adoptLookup(of: target)
         lookUpIfDue(target, now: now)
 
+        if let address = target.address, target.socket < 0 {
+            target.problem = openSocket(target, address: address)
+            if target.problem != nil { target.address = nil }
+        }
+
         if target.socket >= 0, let address = target.address {
             for outcome in drain(target, ipv6: address.ipv6) { target.record(outcome) }
             for outcome in target.tracker.expire(now: clock()) { target.record(outcome) }
@@ -103,6 +108,11 @@ final class PingSampler {
     private func openSocket(_ target: PingTarget, address: PingAddress) -> PingReading.Problem? {
         let fd = socket(address.family, SOCK_DGRAM, address.ipv6 ? IPPROTO_ICMPV6 : IPPROTO_ICMP)
         guard fd >= 0 else { return .socket(errno) }
+        guard fcntl(fd, F_SETNOSIGPIPE, 1) != -1 else {
+            let code = errno
+            Darwin.close(fd)
+            return .socket(code)
+        }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         var on: Int32 = 1
         _ = setsockopt(fd, SOL_SOCKET, SO_TIMESTAMP, &on, socklen_t(MemoryLayout<Int32>.size))
@@ -158,9 +168,10 @@ final class PingSampler {
         let sentAt = clock()
         target.tracker.sent(sequence: sequence, at: sentAt)
         let sent = packet.withUnsafeBytes { Darwin.send(target.socket, $0.baseAddress, $0.count, 0) }
-        if sent != packet.count {
-            target.record(target.tracker.sendFailed(sequence: sequence, at: sentAt))
-        }
+        guard sent != packet.count else { return }
+        let code = sent < 0 ? errno : 0
+        target.record(target.tracker.sendFailed(sequence: sequence, at: sentAt))
+        if PingSocketError.needsNewSocket(code) { target.close() }
     }
 }
 
