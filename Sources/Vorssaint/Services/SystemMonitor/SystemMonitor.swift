@@ -729,7 +729,11 @@ final class SystemMonitor: ObservableObject {
 
             if plan.needPing {
                 if take(.ping) {
-                    self.lastPingReadings = self.pingSampler.sample(targets: plan.pingTargets)
+                    let stride = MonitorSamplingPolicy.sampleStride(for: .ping,
+                                                                    intervalSeconds: intervalSeconds,
+                                                                    foreground: foregroundSampling)
+                    self.lastPingReadings = self.pingSampler.sample(targets: plan.pingTargets,
+                                                                    slotSeconds: TimeInterval(max(1, intervalSeconds) * stride))
                 }
                 next.pings = self.lastPingReadings
             } else if !self.lastPingReadings.isEmpty {

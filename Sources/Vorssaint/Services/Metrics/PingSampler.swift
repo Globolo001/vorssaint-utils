@@ -15,11 +15,11 @@ final class PingSampler {
     private let cookie = (0..<8).map { _ in UInt8.random(in: .min ... .max) }
     private let identifier = UInt16.random(in: .min ... .max)
 
-    init(clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    init(clock: @escaping () -> TimeInterval = { TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000 }) {
         self.clock = clock
     }
 
-    func sample(targets hosts: [PingHost]) -> [PingReading] {
+    func sample(targets hosts: [PingHost], slotSeconds: TimeInterval) -> [PingReading] {
         let wanted = Set(hosts)
         for (host, target) in targets where !wanted.contains(host) {
             target.close()
@@ -28,7 +28,7 @@ final class PingSampler {
         return hosts.map { host in
             let target = targets[host] ?? PingTarget(host: host)
             targets[host] = target
-            return read(target)
+            return read(target, slotSeconds: slotSeconds)
         }
     }
 
@@ -37,7 +37,7 @@ final class PingSampler {
         targets.removeAll()
     }
 
-    private func read(_ target: PingTarget) -> PingReading {
+    private func read(_ target: PingTarget, slotSeconds: TimeInterval) -> PingReading {
         let now = clock()
         adoptLookup(of: target)
         lookUpIfDue(target, now: now)
@@ -59,9 +59,11 @@ final class PingSampler {
         reading.state = target.tracker.state
         reading.lastRTT = target.lastRTT
         reading.smoothedRTT = target.tracker.estimator.smoothedRTT
-        reading.lossRatio = target.history.lossRatio
-        reading.rttHistory = target.history.rttMs.values
-        reading.lostHistory = target.history.lost.values
+        let window = target.history.window(now: now, slotSeconds: slotSeconds)
+        reading.slotSeconds = slotSeconds
+        reading.lossRatio = target.history.lossRatio(now: now)
+        reading.rttHistory = window.rttMs
+        reading.lostHistory = window.lost
         return reading
     }
 

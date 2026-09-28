@@ -171,21 +171,61 @@ enum PingTrackerTests {
     }
 
     private static func history(_ suite: TestSuite) {
+        let slots = PingHistory.slotCount(span: PingHistory.span, slotSeconds: 2)
+        suite.expect(slots == 60 && PingHistory.slotCount(span: PingHistory.span, slotSeconds: 1) == 120
+                        && PingHistory.slotCount(span: PingHistory.span, slotSeconds: 5) == 24,
+                     "the window covers the same span at every sampling interval")
+
+        let empty = PingHistory().window(now: 100, slotSeconds: 2)
+        suite.expect(empty.rttMs.count == slots && empty.rttMs.allSatisfy(\.isNaN) && !empty.lost.contains(1),
+                     "an empty history is a full window of gaps")
+
         var history = PingHistory()
-        history.record(PingSample(sequence: 1, sentAt: 0, rtt: 0.02, late: false))
-        history.record(PingSample(sequence: 2, sentAt: 1, rtt: nil, late: false))
-        history.record(PingSample(sequence: 2, sentAt: 1, rtt: 0.9, late: true))
-        history.record(PingSample(sequence: 3, sentAt: 2, rtt: 0.03, late: false))
-        suite.expect(history.rttMs.values == [20, 0, 30], "history keeps milliseconds with 0 for a loss")
-        suite.expect(history.lost.values == [0, 1, 0], "the loss ring stays aligned with the RTT ring")
-        suite.expectClose(history.lossRatio, 1.0 / 3, "loss ratio is over the recorded probes")
-        for sequence in 0..<300 {
-            history.record(PingSample(sequence: UInt16(sequence), sentAt: 0, rtt: 0.01, late: false))
-        }
-        suite.expect(history.rttMs.values.count == PingHistory.capacity
-                         && history.lost.values.count == PingHistory.capacity,
-                     "both rings stop at the shared capacity")
-        suite.expect(PingHistory().lossRatio == 0, "an empty history has no loss")
+        history.record(PingSample(sequence: 3, sentAt: 96, rtt: 0.03, late: false))
+        history.record(PingSample(sequence: 1, sentAt: 92, rtt: 0.02, late: false))
+        history.record(PingSample(sequence: 2, sentAt: 94, rtt: nil, late: false))
+        history.record(PingSample(sequence: 2, sentAt: 94, rtt: 0.9, late: true))
+        suite.expect(history.samples.map(\.sequence) == [1, 2, 3], "samples are kept in send order")
+        let window = history.window(now: 98, slotSeconds: 2)
+        suite.expect(window.rttMs.count == slots, "the window never grows or shrinks with the data")
+        suite.expect(window.rttMs[slots - 1] == 30 && window.rttMs[slots - 3] == 20,
+                     "each reply sits in the slot of the tick that sent it")
+        suite.expect(window.rttMs[slots - 2].isNaN && window.lost[slots - 2] == 1,
+                     "a lost probe is a marked gap, never a zero")
+        suite.expect(window.rttMs[..<(slots - 3)].allSatisfy(\.isNaN) && !window.lost[..<(slots - 3)].contains(1),
+                     "a young history fills from the right and leaves the left empty")
+
+        let later = history.window(now: 110, slotSeconds: 2)
+        suite.expect(later.rttMs[slots - 7] == 30 && later.rttMs[(slots - 6)...].allSatisfy(\.isNaN)
+                        && !later.lost[(slots - 6)...].contains(1),
+                     "ticks without a probe stay empty instead of pulling the line together")
+
+        var paused = PingHistory()
+        paused.record(PingSample(sequence: 1, sentAt: 0, rtt: 0.01, late: false))
+        paused.record(PingSample(sequence: 2, sentAt: 2, rtt: 0.01, late: false))
+        paused.record(PingSample(sequence: 3, sentAt: 60, rtt: 0.012, late: false))
+        let resumed = paused.window(now: 62, slotSeconds: 2)
+        let finite = resumed.rttMs.indices.filter { resumed.rttMs[$0].isFinite }
+        suite.expect(finite == [slots - 31, slots - 30, slots - 1],
+                     "a pause keeps its real length on the time axis")
+
+        let jittered = PingHistory.slotCount(span: PingHistory.span, slotSeconds: 2)
+        var jitter = PingHistory()
+        jitter.record(PingSample(sequence: 1, sentAt: 10.3, rtt: 0.01, late: false))
+        jitter.record(PingSample(sequence: 2, sentAt: 11.9, rtt: 0.02, late: false))
+        let snapped = jitter.window(now: 14.1, slotSeconds: 2)
+        suite.expect(snapped.rttMs[jittered - 2] == 10 && snapped.rttMs[jittered - 1] == 20,
+                     "timer jitter still lands each probe in its own slot")
+
+        var old = PingHistory()
+        old.record(PingSample(sequence: 1, sentAt: 0, rtt: 0.01, late: false))
+        old.record(PingSample(sequence: 2, sentAt: 1000, rtt: 0.01, late: false))
+        suite.expect(old.samples.count == 1, "samples far outside the window are dropped")
+        suite.expect(!old.window(now: 1002, slotSeconds: 2).rttMs.dropLast().contains(where: \.isFinite),
+                     "nothing from before the window leaks into it")
+
+        suite.expectClose(history.lossRatio(now: 98), 1.0 / 3, "loss ratio is over the probes in the window")
+        suite.expect(PingHistory().lossRatio(now: 0) == 0, "an empty history has no loss")
     }
 
     private static func targets(_ suite: TestSuite) {
@@ -225,6 +265,21 @@ enum PingTrackerTests {
         suite.expect(graph.count == 3 && graph[0] == 12 && graph[1].isNaN && graph[2] == 14,
                      "a lost probe is a gap in the graph, not a zero")
         suite.expect(reading.answeredMilliseconds == [12, 14], "statistics use answered probes only")
+        suite.expect(reading.lostMarks == [false, true, false] && reading.hasSamples,
+                     "only a lost probe carries a loss mark")
+        var sparse = PingReading(host: PingHost("1.1.1.1")!)
+        sparse.rttHistory = [.nan, 12, .nan]
+        sparse.lostHistory = [0, 0, 0]
+        suite.expect(sparse.lostMarks == [false, false, false] && sparse.answeredMilliseconds == [12],
+                     "a slot without data is an unmarked gap")
+        sparse.slotSeconds = 2
+        let menuBar = sparse.window(seconds: 10)
+        suite.expect(menuBar.values.count == 5 && menuBar.values[0].isNaN && menuBar.values[1].isNaN
+                        && menuBar.values[3] == 12,
+                     "a shorter view pads on the left to keep its own fixed span")
+        sparse.slotSeconds = 1
+        suite.expect(sparse.window(seconds: 2).values.count == 2, "a shorter view keeps the newest slots")
+        suite.expect(!PingReading(host: PingHost("1.1.1.1")!).hasSamples, "a fresh reading has no samples")
         suite.expect(!reading.isUnreachable, "an answering target is reachable")
         reading.state = .down
         suite.expect(reading.isUnreachable, "a down target is unreachable")
@@ -347,7 +402,7 @@ enum PingTrackerTests {
             tunnel.sent(sequence: sequence, at: Double(sequence))
             history.record(tunnel.sendFailed(sequence: sequence, at: Double(sequence)).sample)
         }
-        suite.expect(tunnel.state == .down && history.lossRatio == 1,
+        suite.expect(tunnel.state == .down && history.lossRatio(now: 5) == 1,
                      "repeated send failures mark each probe lost and the target down")
         tunnel.sent(sequence: 5, at: 5)
         let recovered = tunnel.received(sequence: 5, at: 5.03)

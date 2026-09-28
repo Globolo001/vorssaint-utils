@@ -79,7 +79,8 @@ struct PingBlock: View {
 
     private func row(_ host: PingHost) -> some View {
         let reading = reading(for: host)
-        let values = reading?.graphValues ?? []
+        let window = reading?.window(seconds: PingHistory.span)
+        let values = window?.values ?? []
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 statusDot(reading)
@@ -103,10 +104,11 @@ struct PingBlock: View {
                           fillOpacity: 0.14,
                           lineWidth: 1.3,
                           showsZeroBaseline: true,
+                          gapMarks: window?.lost ?? [],
                           gapMarkColor: PanelMetricColor.red(for: colorScheme))
                     .frame(height: 22)
             }
-            if let reading, !reading.lostHistory.isEmpty {
+            if let reading, reading.hasSamples {
                 HStack(spacing: 10) {
                     Text("\(strings.loss) \(PingFormat.percent(reading.lossRatio))")
                         .foregroundStyle(reading.lossRatio >= 0.01

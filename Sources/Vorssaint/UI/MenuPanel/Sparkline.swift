@@ -16,6 +16,7 @@ struct Sparkline: View {
     var fillOpacity: Double = 0.16
     var lineWidth: CGFloat = 1.5
     var showsZeroBaseline = false
+    var gapMarks: [Bool] = []
     var gapMarkColor: Color? = nil
 
     var body: some View {
@@ -50,6 +51,13 @@ struct Sparkline: View {
                         }
                     }
                     .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+                    Path { path in
+                        for points in runs where points.count == 1 {
+                            path.addEllipse(in: CGRect(x: points[0].x - lineWidth / 2, y: points[0].y - lineWidth / 2,
+                                                       width: lineWidth, height: lineWidth))
+                        }
+                    }
+                    .fill(color)
                     if let gapMarkColor {
                         Path { path in
                             for x in gapPositions(in: geometry.size) {
@@ -86,8 +94,8 @@ struct Sparkline: View {
     private func gapPositions(in size: CGSize) -> [CGFloat] {
         guard values.count >= 2 else { return [] }
         let lastIndex = values.count - 1
-        return values.enumerated().compactMap { index, value in
-            value.isFinite ? nil : size.width * CGFloat(index) / CGFloat(lastIndex)
+        return gapMarks.prefix(values.count).enumerated().compactMap { index, marked in
+            marked ? size.width * CGFloat(index) / CGFloat(lastIndex) : nil
         }
     }
 }

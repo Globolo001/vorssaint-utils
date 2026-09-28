@@ -109,6 +109,7 @@ struct PingReading: Equatable {
     var smoothedRTT: TimeInterval?
     var lossRatio: Double = 0
     var problem: Problem?
+    var slotSeconds: TimeInterval = 2
     var rttHistory: [Double] = []
     var lostHistory: [Double] = []
 
@@ -116,8 +117,27 @@ struct PingReading: Equatable {
         zip(rttHistory, lostHistory).map { rtt, lost in lost > 0 ? .nan : rtt }
     }
 
+    var lostMarks: [Bool] {
+        lostHistory.map { $0 > 0 }
+    }
+
     var answeredMilliseconds: [Double] {
-        zip(rttHistory, lostHistory).compactMap { rtt, lost in lost > 0 ? nil : rtt }
+        zip(rttHistory, lostHistory).compactMap { rtt, lost in lost > 0 || !rtt.isFinite ? nil : rtt }
+    }
+
+    var hasSamples: Bool {
+        lostHistory.contains { $0 > 0 } || rttHistory.contains { $0.isFinite }
+    }
+
+    func window(seconds: TimeInterval) -> (values: [Double], lost: [Bool]) {
+        let count = PingHistory.slotCount(span: seconds, slotSeconds: slotSeconds)
+        let values = graphValues
+        let marks = lostMarks
+        guard values.count >= count else {
+            let padding = count - values.count
+            return (Array(repeating: .nan, count: padding) + values, Array(repeating: false, count: padding) + marks)
+        }
+        return (Array(values.suffix(count)), Array(marks.suffix(count)))
     }
 
     var isUnreachable: Bool {
@@ -286,20 +306,52 @@ struct PingTracker {
 }
 
 struct PingHistory {
-    static let capacity = 120
+    static let span: TimeInterval = 120
+    static let menuBarSpan: TimeInterval = 48
 
-    private(set) var rttMs = MetricHistory(capacity: PingHistory.capacity)
-    private(set) var lost = MetricHistory(capacity: PingHistory.capacity)
+    private(set) var samples: [PingSample] = []
+
+    static func slotCount(span: TimeInterval, slotSeconds: TimeInterval) -> Int {
+        guard slotSeconds.isFinite, slotSeconds > 0 else { return 2 }
+        return max(2, Int((span / slotSeconds).rounded()))
+    }
 
     mutating func record(_ sample: PingSample) {
         guard !sample.late else { return }
-        rttMs.push((sample.rtt ?? 0) * 1000)
-        lost.push(sample.rtt == nil ? 1 : 0)
+        let index = samples.lastIndex { $0.sentAt <= sample.sentAt }.map { $0 + 1 } ?? 0
+        samples.insert(sample, at: index)
+        if let newest = samples.last?.sentAt {
+            samples.removeAll { $0.sentAt < newest - Self.span * 2 }
+        }
     }
 
-    var lossRatio: Double {
-        let values = lost.values
-        return values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+    mutating func reset() {
+        samples.removeAll()
+    }
+
+    func window(now: TimeInterval, slotSeconds: TimeInterval) -> (rttMs: [Double], lost: [Double]) {
+        let count = Self.slotCount(span: Self.span, slotSeconds: slotSeconds)
+        var rtt = [Double](repeating: .nan, count: count)
+        var lost = [Double](repeating: 0, count: count)
+        guard slotSeconds.isFinite, slotSeconds > 0 else { return (rtt, lost) }
+        for sample in samples {
+            let age = ((now - sample.sentAt) / slotSeconds).rounded() - 1
+            guard age >= 0, age < Double(count) else { continue }
+            let index = count - 1 - Int(age)
+            if let seconds = sample.rtt {
+                rtt[index] = seconds * 1000
+                lost[index] = 0
+            } else if !rtt[index].isFinite {
+                lost[index] = 1
+            }
+        }
+        return (rtt, lost)
+    }
+
+    func lossRatio(now: TimeInterval) -> Double {
+        let recent = samples.filter { now - $0.sentAt <= Self.span }
+        guard !recent.isEmpty else { return 0 }
+        return Double(recent.filter { $0.rtt == nil }.count) / Double(recent.count)
     }
 }
 
