@@ -203,7 +203,7 @@ enum MenuBarSegment {
     case metricBlock(label: String, value: String, minimumValue: String, style: MenuBarBlockStyle, pressure: MemoryPressure?)
     case usageBarBlock(label: String, fraction: Double?, style: MenuBarBlockStyle, pressure: MemoryPressure?)
     case networkBlock(down: String, up: String, style: MenuBarBlockStyle)
-    case pingBlock(label: String, value: String, graph: [Double], lost: [Bool], state: PingTracker.State, mode: PingMenuBarStyle, style: MenuBarBlockStyle)
+    case pingBlock(label: String, value: String, graph: [Double], state: PingTracker.State, mode: PingMenuBarStyle, style: MenuBarBlockStyle)
     case diskActivityBlock(read: String, write: String, style: MenuBarBlockStyle)
     case batteryBlock(percent: Int, isCharging: Bool, style: MenuBarBlockStyle)
     case dot(MemoryPressure)
@@ -621,12 +621,9 @@ enum MenuBarRenderer {
             case .ping:
                 if let reading = pingReading(in: snapshot) {
                     let mode = PingMenuBarStyle.current
-                    let window: (values: [Double], lost: [Bool]) = mode == .graph
-                        ? reading.window(seconds: PingHistory.menuBarSpan) : ([], [])
                     groups.append([.pingBlock(label: PingFormat.menuBarLabel,
                                               value: pingValue(for: reading),
-                                              graph: window.values,
-                                              lost: window.lost,
+                                              graph: mode == .graph ? reading.recentSamples(pingGraphSamples) : [],
                                               state: reading.isUnreachable ? .down : reading.state,
                                               mode: mode,
                                               style: style)])
@@ -894,8 +891,8 @@ enum MenuBarRenderer {
                                                       pressure: pressure))
             case let .networkBlock(down, up, style):
                 result.append(networkBlockAttachment(down: down, up: up, style: style))
-            case let .pingBlock(label, value, graph, lost, state, mode, style):
-                result.append(pingBlockAttachment(label: label, value: value, graph: graph, lost: lost, state: state, mode: mode, style: style))
+            case let .pingBlock(label, value, graph, state, mode, style):
+                result.append(pingBlockAttachment(label: label, value: value, graph: graph, state: state, mode: mode, style: style))
             case let .diskActivityBlock(read, write, style):
                 result.append(diskActivityBlockAttachment(read: read, write: write, style: style))
             case let .batteryBlock(percent, isCharging, style):
@@ -992,11 +989,10 @@ enum MenuBarRenderer {
     private static func pingBlockAttachment(label: String,
                                             value: String,
                                             graph: [Double],
-                                            lost: [Bool],
                                             state: PingTracker.State,
                                             mode: PingMenuBarStyle,
                                             style: MenuBarBlockStyle) -> NSAttributedString {
-        let image = pingBlockImage(label: label, value: value, graph: graph, lost: lost, state: state, mode: mode, style: style)
+        let image = pingBlockImage(label: label, value: value, graph: graph, state: state, mode: mode, style: style)
         let attachment = NSTextAttachment()
         attachment.image = image
         attachment.bounds = NSRect(x: 0,
@@ -1196,6 +1192,8 @@ enum MenuBarRenderer {
                                  style: style)
     }
 
+    static let pingGraphSamples = 24
+
     static func pingGraphSize(style: MenuBarBlockStyle) -> CGSize {
         CGSize(width: style == .readable ? 20 : 18, height: style == .readable ? 13 : 12)
     }
@@ -1212,14 +1210,10 @@ enum MenuBarRenderer {
     private static func pingBlockImage(label: String,
                                        value: String,
                                        graph: [Double],
-                                       lost: [Bool],
                                        state: PingTracker.State,
                                        mode: PingMenuBarStyle,
                                        style: MenuBarBlockStyle) -> NSImage {
-        let graphKey = graph.indices.map { index in
-            graph[index].isFinite ? String(Int(graph[index].rounded()))
-                : (index < lost.count && lost[index] ? "x" : "-")
-        }.joined(separator: ",")
+        let graphKey = graph.map { $0.isFinite ? String(Int($0.rounded())) : "x" }.joined(separator: ",")
         let cacheKey = "ping|\(label)|\(value)|\(state)|\(mode)|\(style)|\(graphKey)" as NSString
         if let cached = blockImageCache.object(forKey: cacheKey) { return cached }
 
@@ -1246,7 +1240,7 @@ enum MenuBarRenderer {
                                        y: (height - graphSize.height) / 2 - 1,
                                        width: graphSize.width,
                                        height: graphSize.height)
-                drawPingGraph(graph, lost: lost, in: graphRect, state: state)
+                drawPingGraph(graph, in: graphRect, state: state)
             }
             let tileX = markWidth + (width - markWidth - tileWidth) / 2
             (label as NSString).draw(at: NSPoint(x: tileX + (tileWidth - labelSize.width) / 2,
@@ -1281,7 +1275,7 @@ enum MenuBarRenderer {
         return image
     }
 
-    private static func drawPingGraph(_ values: [Double], lost: [Bool], in rect: NSRect, state: PingTracker.State) {
+    private static func drawPingGraph(_ values: [Double], in rect: NSRect, state: PingTracker.State) {
         guard values.count >= 2 else { return }
         let finite = values.filter(\.isFinite)
         let peak = max(20, (finite.max() ?? 0) * 1.1)
@@ -1290,31 +1284,24 @@ enum MenuBarRenderer {
         line.lineWidth = 1.2
         line.lineCapStyle = .round
         line.lineJoinStyle = .round
-        let strokeColor = state == .down ? NSColor.systemRed : NSColor.labelColor
-        func point(_ index: Int) -> NSPoint? {
-            guard index >= 0, index < values.count, values[index].isFinite else { return nil }
-            return NSPoint(x: rect.minX + CGFloat(index) * step,
-                           y: rect.minY + 0.5 + (rect.height - 1) * CGFloat(min(1, max(0, values[index] / peak))))
-        }
-        for index in values.indices {
-            guard let current = point(index) else {
-                if index < lost.count, lost[index] {
-                    NSColor.systemRed.setFill()
-                    NSRect(x: rect.minX + CGFloat(index) * step - 0.6, y: rect.minY, width: 1.2, height: 4).fill()
-                }
+        var drawing = false
+        for (index, value) in values.enumerated() {
+            let x = rect.minX + CGFloat(index) * step
+            guard value.isFinite else {
+                drawing = false
+                NSColor.systemRed.setFill()
+                NSRect(x: x - 0.6, y: rect.minY, width: 1.2, height: 4).fill()
                 continue
             }
-            if point(index - 1) != nil {
-                line.line(to: current)
+            let y = rect.minY + 0.5 + (rect.height - 1) * CGFloat(min(1, max(0, value / peak)))
+            if drawing {
+                line.line(to: NSPoint(x: x, y: y))
             } else {
-                line.move(to: current)
-                if point(index + 1) == nil {
-                    strokeColor.setFill()
-                    NSBezierPath(ovalIn: NSRect(x: current.x - 0.6, y: current.y - 0.6, width: 1.2, height: 1.2)).fill()
-                }
+                line.move(to: NSPoint(x: x, y: y))
+                drawing = true
             }
         }
-        strokeColor.setStroke()
+        (state == .down ? NSColor.systemRed : NSColor.labelColor).setStroke()
         line.stroke()
     }
 

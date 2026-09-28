@@ -190,7 +190,7 @@ struct MenuBarMetricsPreview: View {
             .frame(width: MenuBarRenderer.rateBlockWidth(style: style),
                    height: style == .readable ? 22 : 20,
                    alignment: .center)
-        case let .pingBlock(label, value, graph, _, state, mode, style):
+        case let .pingBlock(label, value, graph, state, mode, style):
             HStack(spacing: 3) {
                 if mode == .graph {
                     PingGraphShape(values: graph)

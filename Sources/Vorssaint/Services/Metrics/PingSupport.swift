@@ -141,6 +141,12 @@ struct PingReading: Equatable {
         return (Array(values.suffix(count)), Array(marks.suffix(count)))
     }
 
+    func recentSamples(_ count: Int) -> [Double] {
+        let marks = lostMarks
+        let samples = graphValues.indices.filter { graphValues[$0].isFinite || marks[$0] }
+        return samples.suffix(count).map { graphValues[$0] }
+    }
+
     var isUnreachable: Bool {
         state == .down || (address == nil && problem != nil && problem != .resolving)
     }
@@ -322,7 +328,6 @@ struct PingTracker {
 
 struct PingHistory {
     static let span: TimeInterval = 120
-    static let menuBarSpan: TimeInterval = 48
 
     private(set) var samples: [PingSample] = []
 

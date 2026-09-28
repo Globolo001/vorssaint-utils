@@ -279,6 +279,13 @@ enum PingTrackerTests {
                      "a shorter view pads on the left to keep its own fixed span")
         sparse.slotSeconds = 1
         suite.expect(sparse.window(seconds: 2).values.count == 2, "a shorter view keeps the newest slots")
+        var spread = PingReading(host: PingHost("1.1.1.1")!)
+        spread.rttHistory = [.nan, 10, .nan, .nan, 0, 30, .nan, 40]
+        spread.lostHistory = [0, 0, 0, 0, 1, 0, 0, 0]
+        let recent = spread.recentSamples(3)
+        suite.expect(spread.recentSamples(10).count == 4 && recent.count == 3 && recent[0].isNaN
+                        && recent[1] == 30 && recent[2] == 40,
+                     "the menu bar graph keeps the newest samples back to back, losses included")
         suite.expect(!PingReading(host: PingHost("1.1.1.1")!).hasSamples, "a fresh reading has no samples")
         suite.expect(!reading.isUnreachable, "an answering target is reachable")
         reading.state = .down
