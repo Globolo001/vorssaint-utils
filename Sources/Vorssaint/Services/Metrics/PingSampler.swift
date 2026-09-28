@@ -3,53 +3,15 @@
 
 import Darwin
 import Foundation
+import SystemConfiguration
 
-/// One ping target as the monitor last read it.
-struct PingReading: Equatable {
-    enum Problem: Equatable {
-        /// The name is being looked up for the first time.
-        case resolving
-        /// The name did not resolve; looked up again every few seconds.
-        case unresolved
-        /// The ICMP socket could not be opened, with its errno.
-        case socket(Int32)
-    }
-
-    let host: PingHost
-    var address: String?
-    var state: PingTracker.State = .unknown
-    var lastRTT: TimeInterval?
-    var smoothedRTT: TimeInterval?
-    var lossRatio: Double = 0
-    var problem: Problem?
-    /// Oldest → newest, milliseconds, 0 for a lost probe. Empty while no
-    /// graph is visible, like the monitor's other histories.
-    var rttHistory: [Double] = []
-    /// Aligned with `rttHistory`: 1 for a lost probe, 0 for an answered one.
-    var lostHistory: [Double] = []
-}
-
-/// ICMP ping for `SystemMonitor`, read on its tick like every other sampler.
-///
-/// Each target keeps an unprivileged ICMP datagram socket (no root, no
-/// helper) connected to its address. A read drains the replies that queued
-/// since the last tick, using the kernel's receive timestamps so the round
-/// trip is exact however late the tick is, expires probes whose timeout ran
-/// out, then sends the next probe. No timers or read sources of its own.
-///
-/// Called only on the monitor's queue. Name lookups block, so they run on a
-/// side queue and are picked up by a later read.
 final class PingSampler {
-    /// Names are looked up again this often, so a moved host is followed.
     static let refreshSeconds: TimeInterval = 300
-    /// A failed lookup, or a target that went down, retries after this.
     static let retrySeconds: TimeInterval = 5
 
     private let lookupQueue = DispatchQueue(label: "com.vorssaint.ping.lookup", qos: .utility)
     private let clock: () -> TimeInterval
     private var targets: [PingHost: PingTarget] = [:]
-    /// Echoed back verbatim; filters out replies to anyone else's pings
-    /// without trusting the kernel to keep the identifier as sent.
     private let cookie = (0..<8).map { _ in UInt8.random(in: .min ... .max) }
     private let identifier = UInt16.random(in: .min ... .max)
 
@@ -57,7 +19,7 @@ final class PingSampler {
         self.clock = clock
     }
 
-    func sample(targets hosts: [PingHost], publishHistory: Bool) -> [PingReading] {
+    func sample(targets hosts: [PingHost]) -> [PingReading] {
         let wanted = Set(hosts)
         for (host, target) in targets where !wanted.contains(host) {
             target.close()
@@ -66,17 +28,16 @@ final class PingSampler {
         return hosts.map { host in
             let target = targets[host] ?? PingTarget(host: host)
             targets[host] = target
-            return read(target, publishHistory: publishHistory)
+            return read(target)
         }
     }
 
-    /// Closes every socket; the next read starts over.
     func reset() {
         targets.values.forEach { $0.close() }
         targets.removeAll()
     }
 
-    private func read(_ target: PingTarget, publishHistory: Bool) -> PingReading {
+    private func read(_ target: PingTarget) -> PingReading {
         let now = clock()
         adoptLookup(of: target)
         lookUpIfDue(target, now: now)
@@ -90,17 +51,14 @@ final class PingSampler {
         var reading = PingReading(host: target.host)
         reading.address = target.address?.text
         reading.problem = target.problem
-        reading.state = target.address == nil && target.problem != nil && target.problem != .resolving
-            ? .down : target.tracker.state
+        reading.state = target.tracker.state
         reading.lastRTT = target.lastRTT
         reading.smoothedRTT = target.tracker.estimator.smoothedRTT
         reading.lossRatio = target.history.lossRatio
-        reading.rttHistory = target.history.rttMs.publishedValues(whileVisible: publishHistory)
-        reading.lostHistory = target.history.lost.publishedValues(whileVisible: publishHistory)
+        reading.rttHistory = target.history.rttMs.values
+        reading.lostHistory = target.history.lost.values
         return reading
     }
-
-    // MARK: Lookup
 
     private func lookUpIfDue(_ target: PingTarget, now: TimeInterval) {
         guard !target.lookupInFlight else { return }
@@ -108,7 +66,7 @@ final class PingSampler {
         let due: Bool
         if target.address == nil {
             due = sinceLookup >= Self.retrySeconds
-        } else if target.host.kind == .name {
+        } else if !target.host.isLiteral {
             due = sinceLookup >= Self.refreshSeconds
                 || (target.tracker.state == .down && sinceLookup >= Self.retrySeconds)
         } else {
@@ -116,8 +74,7 @@ final class PingSampler {
         }
         guard due else { return }
         target.lookedUpAt = now
-        if target.host.kind != .name {
-            // A literal parses instantly; no reason to wait a tick.
+        if target.host.isLiteral {
             target.finishLookup(PingAddress.resolve(target.host))
             adoptLookup(of: target)
             return
@@ -132,7 +89,6 @@ final class PingSampler {
     private func adoptLookup(of target: PingTarget) {
         guard let result = target.takeLookup() else { return }
         guard let address = result else {
-            // Keep pinging a known address: DNS failing is not the host failing.
             if target.address == nil { target.problem = .unresolved }
             return
         }
@@ -141,11 +97,8 @@ final class PingSampler {
         target.address = address
         target.tracker = PingTracker()
         target.problem = openSocket(target, address: address)
-        // Without a socket, forget the address so the next lookup retries.
         if target.problem != nil { target.address = nil }
     }
-
-    // MARK: Socket
 
     private func openSocket(_ target: PingTarget, address: PingAddress) -> PingReading.Problem? {
         let fd = socket(address.family, SOCK_DGRAM, address.ipv6 ? IPPROTO_ICMPV6 : IPPROTO_ICMP)
@@ -153,7 +106,6 @@ final class PingSampler {
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         var on: Int32 = 1
         _ = setsockopt(fd, SOL_SOCKET, SO_TIMESTAMP, &on, socklen_t(MemoryLayout<Int32>.size))
-        // Connected, the kernel only delivers ICMP from this address.
         guard address.withSockaddr({ connect(fd, $0, $1) }) == 0 else {
             let code = errno
             Darwin.close(fd)
@@ -167,7 +119,6 @@ final class PingSampler {
         var outcomes: [PingTracker.Outcome] = []
         var buffer = [UInt8](repeating: 0, count: 1024)
         var control = [UInt8](repeating: 0, count: 64)
-        // Bounded, so a flood cannot hold up the rest of the tick.
         for _ in 0..<64 {
             var controlLength = 0
             let count = buffer.withUnsafeMutableBytes { data in
@@ -213,9 +164,6 @@ final class PingSampler {
     }
 }
 
-/// A target's socket, address and measurements. Touched on the monitor's
-/// queue, except the lookup result, which the lookup queue hands over under
-/// the lock.
 private final class PingTarget {
     let host: PingHost
     var address: PingAddress?
@@ -244,7 +192,6 @@ private final class PingTarget {
         lock.withLock { lookupResult = .some(address) }
     }
 
-    /// The finished lookup, once: `.some(nil)` for a failure.
     func takeLookup() -> PingAddress?? {
         lock.withLock {
             guard let result = lookupResult else { return nil }
@@ -260,7 +207,6 @@ private final class PingTarget {
     }
 }
 
-/// A resolved socket address, copied out of `getaddrinfo`.
 private struct PingAddress: Equatable {
     let family: Int32
     let text: String
@@ -278,15 +224,18 @@ private struct PingAddress: Equatable {
         }
     }
 
-    /// Blocking for names. Takes the first address the system prefers, which
-    /// already follows its IPv4/IPv6 policy.
     static func resolve(_ host: PingHost) -> PingAddress? {
+        var name = host.text
+        if host.kind == .gateway {
+            guard let router = gatewayAddress() else { return nil }
+            name = router
+        }
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = SOCK_DGRAM
         hints.ai_flags = host.kind == .name ? AI_ADDRCONFIG : AI_NUMERICHOST
         var list: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host.text, nil, &hints, &list) == 0 else { return nil }
+        guard getaddrinfo(name, nil, &hints, &list) == 0 else { return nil }
         defer { freeaddrinfo(list) }
         var cursor = list
         while let info = cursor?.pointee {
@@ -295,10 +244,21 @@ private struct PingAddress: Equatable {
                   let socketAddress = info.ai_addr else { continue }
             let bytes = Array(UnsafeRawBufferPointer(start: UnsafeRawPointer(socketAddress),
                                                      count: Int(info.ai_addrlen)))
-            var name = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            guard getnameinfo(socketAddress, info.ai_addrlen, &name, socklen_t(name.count),
+            var numeric = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(socketAddress, info.ai_addrlen, &numeric, socklen_t(numeric.count),
                               nil, 0, NI_NUMERICHOST) == 0 else { continue }
-            return PingAddress(family: info.ai_family, text: String(cString: name), storage: bytes)
+            return PingAddress(family: info.ai_family, text: String(cString: numeric), storage: bytes)
+        }
+        return nil
+    }
+
+    private static func gatewayAddress() -> String? {
+        guard let store = SCDynamicStoreCreate(nil, "Vorssaint.ping" as CFString, nil, nil) else { return nil }
+        for key in ["State:/Network/Global/IPv4", "State:/Network/Global/IPv6"] {
+            if let value = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any],
+               let router = value["Router"] as? String, !router.isEmpty {
+                return router
+            }
         }
         return nil
     }

@@ -30,6 +30,7 @@ struct MonitorPanelConfig: View {
     @AppStorage(DefaultsKey.monitorNetTotals) private var netTotals = true
     @AppStorage(DefaultsKey.monitorNetTest) private var netTest = true
     @AppStorage(DefaultsKey.monitorNetAddresses) private var netAddresses = true
+    @AppStorage(DefaultsKey.monitorNetPing) private var netPing = true
 
     @AppStorage(DefaultsKey.monitorShowDisk) private var showDisk = true
     @AppStorage(DefaultsKey.monitorDiskUsage) private var diskUsage = true
@@ -122,6 +123,7 @@ struct MonitorPanelConfig: View {
             itemTile(l10n.s.monitorItemUptime, symbol: "clock", value: $sysUptime, available: available)
         case .network:
             itemTile(l10n.s.monitorItemNetSpeed, symbol: "speedometer", value: $netSpeed, available: available)
+            itemTile(FeatureStrings.ping(l10n.language).title, symbol: MenuBarMetric.ping.symbolName, value: $netPing, available: available)
             itemTile(l10n.s.networkApps, symbol: "app.badge", value: $netApps, available: available)
             itemTile(l10n.s.monitorItemNetTotals, symbol: "sum", value: $netTotals, available: available)
             itemTile(l10n.s.networkIPAddresses, symbol: "network", value: $netAddresses, available: available)
@@ -180,6 +182,7 @@ struct MonitorPanelConfig: View {
         if AppFeature.monitorNetwork.isAvailable {
             block(.network, title: l10n.s.networkSection, master: $showNetwork) {
                 Toggle(l10n.s.monitorItemNetSpeed, isOn: $netSpeed)
+                Toggle(FeatureStrings.ping(l10n.language).title, isOn: $netPing)
                 Toggle(l10n.s.networkApps, isOn: $netApps)
                 Toggle(l10n.s.monitorItemNetTotals, isOn: $netTotals)
                 Toggle(l10n.s.networkIPAddresses, isOn: $netAddresses)

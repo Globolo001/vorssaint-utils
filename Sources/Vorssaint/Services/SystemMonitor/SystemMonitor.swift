@@ -68,7 +68,6 @@ struct SystemSnapshot {
     // Connected USB Devices
     var connectedDevices: [ConnectedUSBDevice] = []
 
-    // Ping, in the order the targets were set
     var pings: [PingReading] = []
 
     // History (oldest → newest) for the graphs
@@ -148,8 +147,6 @@ final class SystemMonitor: ObservableObject {
     private var notchAccessoryMonitoring = false
     private var menuBarActive = false
     private var alertsActive = false
-    /// Hosts a surface wants pinged; any target keeps the monitor running.
-    private var pingTargets: [PingHost] = []
     private var refreshInFlight = false
     private var pendingRefresh = false
     private var pendingRefreshSuppressesGPU = false
@@ -414,24 +411,6 @@ final class SystemMonitor: ObservableObject {
         }
     }
 
-    /// The hosts to ping on every tick, in display order. Like the other
-    /// activation setters, a non-empty list keeps the monitor running and an
-    /// empty one lets it stop; removed targets close their sockets.
-    func setPingTargets(_ hosts: [PingHost]) {
-        runOnMain { [weak self] in
-            guard let self, hosts != pingTargets else { return }
-            pingTargets = hosts
-            if hosts.isEmpty {
-                // A monitor that keeps running closes the sockets on its next
-                // tick; one that stops closes them here.
-                stopTimerIfIdle()
-            } else {
-                ensureTimer()
-                refresh()
-            }
-        }
-    }
-
     /// A settings change can swap which metrics are needed without flipping
     /// any activation flag. On a slow wake cadence the newly pinned metric
     /// would sit on its placeholder until the next wake (up to 60 s), so a
@@ -487,7 +466,7 @@ final class SystemMonitor: ObservableObject {
     /// independent surfaces cannot desync.
     private var fullMonitorVisible: Bool { panelClients > 0 }
 
-    private var shouldRun: Bool { fullMonitorVisible || menuPanelNeeds.any || notchDetailNeeds.any || notchVisible || notchAccessoryMonitoring || menuBarActive || alertsActive || !pingTargets.isEmpty }
+    private var shouldRun: Bool { fullMonitorVisible || menuPanelNeeds.any || notchDetailNeeds.any || notchVisible || notchAccessoryMonitoring || menuBarActive || alertsActive }
 
     private func shouldSample(defaults: UserDefaults = .standard) -> Bool {
         shouldRun && currentPlan(defaults: defaults).any
@@ -506,7 +485,9 @@ final class SystemMonitor: ObservableObject {
         var needBatteryTemperature = false
         var needFanSpeed = false
         var needConnectedDevices = false
-        var needPing = false
+        var pingTargets: [PingHost] = []
+
+        var needPing: Bool { !pingTargets.isEmpty }
 
         var needSMC: Bool { needPower || needTemperature || needFanSpeed }
 
@@ -586,7 +567,10 @@ final class SystemMonitor: ObservableObject {
         }
         plan.needConnectedDevices = menuPanelNeeds.connectedDevices
             || defaults.bool(forKey: DefaultsKey.menuBarConnectedDevices)
-        plan.needPing = !pingTargets.isEmpty
+        if defaults.bool(forKey: DefaultsKey.menuBarPing)
+            || (panelNeedsNetwork && defaults.bool(forKey: DefaultsKey.monitorNetPing)) {
+            plan.pingTargets = PingTargets.hosts(from: defaults.string(forKey: DefaultsKey.pingTargets) ?? "")
+        }
 
         // The hub gates whole metric families: an unavailable metric never
         // samples, no matter what is pinned, shown or alerting.
@@ -604,7 +588,7 @@ final class SystemMonitor: ObservableObject {
         if !available(.monitorMemory) { plan.needMemory = false }
         if !available(.monitorNetwork) {
             plan.needNetwork = false
-            plan.needPing = false
+            plan.pingTargets = []
         }
         if !available(.monitorDisk) { plan.needDisk = false }
         if !available(.monitorPower) {
@@ -634,7 +618,6 @@ final class SystemMonitor: ObservableObject {
         guard !shouldSample() else { return }
         timer?.invalidate()
         timer = nil
-        // Sockets are the one thing a stopped monitor would otherwise hold.
         queue.async { [weak self] in
             guard let self, !self.lastPingReadings.isEmpty else { return }
             self.pingSampler.reset()
@@ -716,7 +699,6 @@ final class SystemMonitor: ObservableObject {
         let suppressGPUReadsUntil = self.suppressGPUReadsUntil
         let foregroundSampling = fullMonitorVisible || menuPanelNeeds.any || notchDetailNeeds.any || notchVisible
         let intervalSeconds = self.intervalSeconds
-        let pingTargets = self.pingTargets
         // Ticks advance by the timer's cadence so `tick % stride` keeps
         // measuring base intervals; mutated on main only, read by the queue
         // through the captured value.
@@ -745,14 +727,9 @@ final class SystemMonitor: ObservableObject {
                 return sample
             }
 
-            // First, so a slow SMC or process read later in the tick does not
-            // hold up the next probe. The sampler times replies with the
-            // kernel's receive stamps, so the tick's own delay never shows up
-            // in the round trip.
             if plan.needPing {
                 if take(.ping) {
-                    self.lastPingReadings = self.pingSampler.sample(targets: pingTargets,
-                                                                    publishHistory: foregroundSampling)
+                    self.lastPingReadings = self.pingSampler.sample(targets: plan.pingTargets)
                 }
                 next.pings = self.lastPingReadings
             } else if !self.lastPingReadings.isEmpty {

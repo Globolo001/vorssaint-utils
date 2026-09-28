@@ -3,17 +3,26 @@
 
 import Foundation
 
-/// What the user typed as something to ping: a hostname, a domain, or an IPv4
-/// or IPv6 literal. A pasted URL is reduced to its host, so copying an address
-/// out of a browser works without cleanup.
 struct PingHost: Hashable {
-    enum Kind: Equatable { case ipv4, ipv6, name }
+    enum Kind: Equatable { case ipv4, ipv6, name, gateway }
+
+    static let gatewayToken = "@gateway"
+    static let gateway = PingHost(text: gatewayToken, kind: .gateway)
 
     let text: String
     let kind: Kind
 
+    private init(text: String, kind: Kind) {
+        self.text = text
+        self.kind = kind
+    }
+
     init?(_ raw: String) {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.lowercased() == PingHost.gatewayToken {
+            self = .gateway
+            return
+        }
         if text.contains("://"), let host = URLComponents(string: text)?.host {
             text = host
         }
@@ -36,13 +45,13 @@ struct PingHost: Hashable {
                     && !label.hasPrefix("-") && !label.hasSuffix("-")
                     && label.unicodeScalars.allSatisfy(allowed.contains)
             }) else { return nil }
-            // An all-numeric dotted name is an IPv4 address that failed to
-            // parse, never a host worth handing to DNS.
             guard !labels.allSatisfy({ $0.allSatisfy(\.isNumber) }) else { return nil }
             self.text = text.lowercased()
             kind = .name
         }
     }
+
+    var isLiteral: Bool { kind == .ipv4 || kind == .ipv6 }
 
     private static func isLiteral(_ text: String, family: Int32) -> Bool {
         var storage = in6_addr()
@@ -50,18 +59,102 @@ struct PingHost: Hashable {
     }
 }
 
-/// Derives each probe's timeout from the replies seen so far, in the manner of
-/// TCP's retransmission timer (RFC 6298): a smoothed RTT plus four times its
-/// mean deviation. Probes are judged on the monitor's tick, so a timeout below
-/// the tick interval simply expires at the next tick; the estimate matters
-/// when replies take longer than a tick, where a jittery link gets room for
-/// its usual spikes instead of flapping.
+enum PingTargets {
+    static let maximumCount = 6
+    static let defaultList = [PingHost.gatewayToken, "1.1.1.1"].joined(separator: "\n")
+    static let defaultMenuBarTarget = "1.1.1.1"
+
+    static func hosts(from raw: String) -> [PingHost] {
+        var seen = Set<PingHost>()
+        var hosts: [PingHost] = []
+        for line in raw.split(whereSeparator: \.isNewline) {
+            guard let host = PingHost(String(line)), seen.insert(host).inserted else { continue }
+            hosts.append(host)
+            if hosts.count == maximumCount { break }
+        }
+        return hosts
+    }
+
+    static func raw(from hosts: [PingHost]) -> String {
+        hosts.map(\.text).joined(separator: "\n")
+    }
+
+    static func adding(_ host: PingHost, to raw: String) -> String {
+        var hosts = self.hosts(from: raw)
+        guard !hosts.contains(host), hosts.count < maximumCount else { return self.raw(from: hosts) }
+        hosts.append(host)
+        return self.raw(from: hosts)
+    }
+
+    static func removing(_ host: PingHost, from raw: String) -> String {
+        self.raw(from: hosts(from: raw).filter { $0 != host })
+    }
+
+    static func menuBarReading(in readings: [PingReading], pinned: String) -> PingReading? {
+        readings.first { $0.host.text == pinned } ?? readings.first
+    }
+}
+
+struct PingReading: Equatable {
+    enum Problem: Equatable {
+        case resolving
+        case unresolved
+        case socket(Int32)
+    }
+
+    let host: PingHost
+    var address: String?
+    var state: PingTracker.State = .unknown
+    var lastRTT: TimeInterval?
+    var smoothedRTT: TimeInterval?
+    var lossRatio: Double = 0
+    var problem: Problem?
+    var rttHistory: [Double] = []
+    var lostHistory: [Double] = []
+
+    var graphValues: [Double] {
+        zip(rttHistory, lostHistory).map { rtt, lost in lost > 0 ? .nan : rtt }
+    }
+
+    var answeredMilliseconds: [Double] {
+        zip(rttHistory, lostHistory).compactMap { rtt, lost in lost > 0 ? nil : rtt }
+    }
+
+    var isUnreachable: Bool {
+        state == .down || (address == nil && problem != nil && problem != .resolving)
+    }
+}
+
+enum PingFormat {
+    static func milliseconds(_ value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "–" }
+        return value < 10
+            ? String(format: "%.1f", locale: MetricFormat.locale, value)
+            : String(format: "%.0f", locale: MetricFormat.locale, value.rounded())
+    }
+
+    static func menuBarValue(_ seconds: TimeInterval?) -> String {
+        guard let seconds else { return "–" }
+        return milliseconds(seconds * 1000) + "ms"
+    }
+
+    static func percent(_ ratio: Double) -> String {
+        let value = max(0, min(1, ratio)) * 100
+        return value > 0 && value < 1
+            ? String(format: "%.1f%%", locale: MetricFormat.locale, value)
+            : String(format: "%.0f%%", locale: MetricFormat.locale, value)
+    }
+
+    static func summary(_ milliseconds: [Double]) -> String? {
+        guard let low = milliseconds.min(), let high = milliseconds.max(), !milliseconds.isEmpty else { return nil }
+        let average = milliseconds.reduce(0, +) / Double(milliseconds.count)
+        return [low, average, high].map(self.milliseconds).joined(separator: "/")
+    }
+}
+
 struct PingTimeoutEstimator {
-    /// Nothing measured yet.
     static let initialTimeout: TimeInterval = 1
-    /// Below this, Wi-Fi power save and scheduler noise alone cause misses.
     static let minimumTimeout: TimeInterval = 0.3
-    /// Beyond this a reply is too late to call the host reachable in real time.
     static let maximumTimeout: TimeInterval = 3
 
     private(set) var smoothedRTT: TimeInterval?
@@ -90,28 +183,13 @@ struct PingTimeoutEstimator {
     }
 }
 
-/// One finished probe: a reply, or a probe that ran out of time.
 struct PingSample: Equatable {
     let sequence: UInt16
-    /// System uptime when the probe left, in seconds.
     let sentAt: TimeInterval
-    /// `nil` when the probe was lost.
     let rtt: TimeInterval?
-    /// A reply that arrived after its probe had already been counted as lost.
     let late: Bool
 }
 
-/// Reachability of one target, decided from its probes.
-///
-/// One missing reply is not an outage: Wi-Fi drops a frame now and then. The
-/// first miss only makes the target suspect; a second consecutive miss marks
-/// it down. Any reply, even a late one, proves the host is there and brings it
-/// back up. `SystemMonitor` drives it once per sampling tick: replies queued
-/// since the last tick first, then the probes whose timeout ran out, then the
-/// next probe.
-///
-/// Times are system uptime seconds, which stop while the Mac sleeps, the same
-/// clock `SustainedAlertGate` uses.
 struct PingTracker {
     enum State: Equatable { case unknown, up, suspect, down }
 
@@ -122,7 +200,6 @@ struct PingTracker {
     }
 
     static let missesUntilDown = 2
-    /// Lost probes kept so a late reply can still be matched to its send time.
     static let maximumRemembered = 64
     static let rememberedSeconds: TimeInterval = 30
 
@@ -136,11 +213,8 @@ struct PingTracker {
         var expired: Bool
     }
     private var probes: [UInt16: Probe] = [:]
-    /// Send time of the newest probe that got a reply. A timeout of a probe
-    /// sent before it says nothing about the present.
     private var newestAnsweredSentAt: TimeInterval = -.infinity
 
-    /// Records a probe that just left and returns how long it may take.
     @discardableResult
     mutating func sent(sequence: UInt16, at time: TimeInterval) -> TimeInterval {
         prune(now: time)
@@ -149,7 +223,6 @@ struct PingTracker {
         return timeout
     }
 
-    /// A reply for `sequence`. `nil` for a duplicate or a reply to nothing sent.
     mutating func received(sequence: UInt16, at time: TimeInterval) -> Outcome? {
         guard let probe = probes[sequence], time >= probe.sentAt else { return nil }
         probes.removeValue(forKey: sequence)
@@ -161,8 +234,6 @@ struct PingTracker {
         return transition(to: .up, sample: sample)
     }
 
-    /// Every unanswered probe whose timeout has run out by `now`, oldest
-    /// first. Each probe expires once; a reply after that still counts, late.
     mutating func expire(now: TimeInterval) -> [Outcome] {
         let due = probes.filter { !$0.value.expired && $0.value.deadline <= now }
             .sorted { $0.value.sentAt < $1.value.sentAt }
@@ -172,8 +243,6 @@ struct PingTracker {
         }
     }
 
-    /// The probe could not even be sent (no route, interface down). That is
-    /// as good as a miss, and known right away.
     mutating func sendFailed(sequence: UInt16, at time: TimeInterval) -> Outcome {
         probes.removeValue(forKey: sequence)
         return miss(sequence: sequence, sentAt: time)
@@ -181,8 +250,6 @@ struct PingTracker {
 
     private mutating func miss(sequence: UInt16, sentAt: TimeInterval) -> Outcome {
         let sample = PingSample(sequence: sequence, sentAt: sentAt, rtt: nil, late: false)
-        // A newer probe already came back: this loss is old news. It still
-        // counts in the history, but not against the target's state.
         guard sentAt >= newestAnsweredSentAt else {
             return Outcome(sample: sample, state: state, stateChanged: false)
         }
@@ -204,32 +271,24 @@ struct PingTracker {
     }
 }
 
-/// Recent probes of one target, as two aligned `MetricHistory` rings: the
-/// round trip in milliseconds (0 for a lost probe) and a loss flag (1 lost,
-/// 0 answered). A graph draws the first and marks gaps from the second.
 struct PingHistory {
     static let capacity = 120
 
     private(set) var rttMs = MetricHistory(capacity: PingHistory.capacity)
     private(set) var lost = MetricHistory(capacity: PingHistory.capacity)
 
-    /// A late reply replaces nothing: its loss was already recorded when the
-    /// probe timed out, and it only moves the estimator and the state.
     mutating func record(_ sample: PingSample) {
         guard !sample.late else { return }
         rttMs.push((sample.rtt ?? 0) * 1000)
         lost.push(sample.rtt == nil ? 1 : 0)
     }
 
-    /// Share of the recorded probes that were lost, 0 to 1.
     var lossRatio: Double {
         let values = lost.values
         return values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
     }
 }
 
-/// ICMP echo framing for unprivileged datagram sockets. Pure bytes in and out,
-/// so it runs in the test target.
 enum ICMPEcho {
     static let requestV4: UInt8 = 8
     static let replyV4: UInt8 = 0
@@ -248,8 +307,6 @@ enum ICMPEcho {
                                UInt8(identifier >> 8), UInt8(identifier & 0xff),
                                UInt8(sequence >> 8), UInt8(sequence & 0xff)]
         packet += payload
-        // The kernel fills in the ICMPv6 checksum, which covers a pseudo
-        // header only it knows; for IPv4 it is ours to set.
         if !ipv6 {
             let sum = checksum(packet)
             packet[2] = UInt8(sum >> 8)
@@ -258,8 +315,6 @@ enum ICMPEcho {
         return packet
     }
 
-    /// Parses what `recv` returned. macOS hands IPv4 datagram-socket replies
-    /// over with their IP header in front; IPv6 ones arrive bare.
     static func parseReply(_ bytes: [UInt8], ipv6: Bool) -> Reply? {
         var offset = 0
         if !ipv6 {
@@ -279,12 +334,6 @@ enum ICMPEcho {
                      payload: Array(bytes[(offset + headerLength)...]))
     }
 
-    /// The receive time the kernel attached to a datagram (`SO_TIMESTAMP`),
-    /// read out of `recvmsg`'s control buffer. The monitor drains the socket
-    /// only once per tick, so this, not the time of the read, is when the
-    /// reply arrived. Layout per `<sys/socket.h>` on Darwin: a 12-byte
-    /// `cmsghdr` (length, level, type), data aligned to 4 bytes, and a 64-bit
-    /// `timeval` (seconds, then microseconds).
     static func kernelTimestamp(control: [UInt8], length: Int,
                                 level: Int32, type: Int32) -> TimeInterval? {
         let end = min(length, control.count)
@@ -309,9 +358,6 @@ enum ICMPEcho {
         }
     }
 
-    /// Kernel timestamps are wall-clock time; the tracker runs on uptime.
-    /// The two are read together at drain time, and a wall clock that jumped
-    /// in between (or a timestamp from the future) falls back to now.
     static func uptime(ofWallTime wall: TimeInterval, uptime: TimeInterval,
                        wallNow: TimeInterval) -> TimeInterval {
         let age = wallNow - wall
@@ -319,8 +365,6 @@ enum ICMPEcho {
         return uptime - age
     }
 
-    /// The Internet checksum (RFC 1071). Over a packet that already carries
-    /// its checksum, the result is 0.
     static func checksum(_ bytes: [UInt8]) -> UInt16 {
         var sum: UInt32 = 0
         var index = 0

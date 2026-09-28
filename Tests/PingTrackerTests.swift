@@ -3,8 +3,6 @@
 
 import Foundation
 
-/// The live ping's decisions: target parsing, adaptive timeouts, the
-/// suspect/down state machine, history and ICMP framing. Times are scripted.
 enum PingTrackerTests {
     static func run(_ suite: TestSuite) {
         hosts(suite)
@@ -13,6 +11,9 @@ enum PingTrackerTests {
         lateAndStaleReplies(suite)
         history(suite)
         framing(suite)
+        targets(suite)
+        readings(suite)
+        strings(suite)
     }
 
     private static func hosts(_ suite: TestSuite) {
@@ -70,7 +71,6 @@ enum PingTrackerTests {
         suite.expect(tracker.received(sequence: 1, at: 0.03) == nil, "a duplicate reply is ignored")
         suite.expect(tracker.received(sequence: 99, at: 0.03) == nil, "a reply to nothing sent is ignored")
 
-        // One-second ticks: each tick drains, expires, then sends.
         let timeout = tracker.sent(sequence: 2, at: 1)
         suite.expect(tracker.expire(now: 1 + timeout - 0.01).isEmpty, "a probe is not lost before its timeout")
         let suspect = tracker.expire(now: 2)
@@ -187,6 +187,66 @@ enum PingTrackerTests {
         suite.expect(PingHistory().lossRatio == 0, "an empty history has no loss")
     }
 
+    private static func targets(_ suite: TestSuite) {
+        suite.expect(PingHost(PingHost.gatewayToken) == PingHost.gateway && PingHost.gateway.kind == .gateway,
+                     "the router token parses to the gateway target")
+        suite.expect(PingHost("router")?.kind == .name, "a host literally named router stays a name")
+        suite.expect(!PingHost.gateway.isLiteral && PingHost("1.1.1.1")?.isLiteral == true,
+                     "only address literals skip lookups")
+        let defaults = PingTargets.hosts(from: PingTargets.defaultList)
+        suite.expect(defaults == [PingHost.gateway, PingHost("1.1.1.1")!],
+                     "the default targets are the router and 1.1.1.1")
+        suite.expect(PingTargets.hosts(from: "1.1.1.1\n\nbad host\n1.1.1.1\nExample.com") == [PingHost("1.1.1.1")!, PingHost("example.com")!],
+                     "saved targets skip blanks, invalid entries and duplicates")
+        let many = (1...10).map { "10.0.0.\($0)" }.joined(separator: "\n")
+        suite.expect(PingTargets.hosts(from: many).count == PingTargets.maximumCount, "targets are capped")
+        let added = PingTargets.adding(PingHost("8.8.8.8")!, to: PingTargets.defaultList)
+        suite.expect(PingTargets.hosts(from: added).last == PingHost("8.8.8.8"), "a new target goes last")
+        suite.expect(PingTargets.adding(PingHost("1.1.1.1")!, to: PingTargets.defaultList) == PingTargets.defaultList,
+                     "adding a present target changes nothing")
+        suite.expect(PingTargets.hosts(from: PingTargets.removing(PingHost.gateway, from: added))
+                         == [PingHost("1.1.1.1")!, PingHost("8.8.8.8")!],
+                     "removing a target keeps the others in order")
+        let router = PingReading(host: PingHost.gateway)
+        let cloudflare = PingReading(host: PingHost("1.1.1.1")!)
+        suite.expect(PingTargets.menuBarReading(in: [router, cloudflare], pinned: "1.1.1.1") == cloudflare,
+                     "the menu bar shows the pinned target")
+        suite.expect(PingTargets.menuBarReading(in: [router, cloudflare], pinned: "gone.example") == router,
+                     "a pinned target that was removed falls back to the first one")
+        suite.expect(PingTargets.menuBarReading(in: [], pinned: "1.1.1.1") == nil, "no targets, no menu bar value")
+    }
+
+    private static func readings(_ suite: TestSuite) {
+        var reading = PingReading(host: PingHost("1.1.1.1")!)
+        reading.rttHistory = [12, 0, 14]
+        reading.lostHistory = [0, 1, 0]
+        let graph = reading.graphValues
+        suite.expect(graph.count == 3 && graph[0] == 12 && graph[1].isNaN && graph[2] == 14,
+                     "a lost probe is a gap in the graph, not a zero")
+        suite.expect(reading.answeredMilliseconds == [12, 14], "statistics use answered probes only")
+        suite.expect(!reading.isUnreachable, "an answering target is reachable")
+        reading.state = .down
+        suite.expect(reading.isUnreachable, "a down target is unreachable")
+        var unresolved = PingReading(host: PingHost("nothing.invalid")!)
+        unresolved.problem = .unresolved
+        suite.expect(unresolved.isUnreachable, "a name that never resolved is unreachable")
+        unresolved.problem = .resolving
+        suite.expect(!unresolved.isUnreachable, "a name still resolving is not yet unreachable")
+
+        MetricFormat.locale = Locale(identifier: "en_US")
+        suite.expect(PingFormat.milliseconds(3.24) == "3.2", "fast round trips keep one decimal")
+        suite.expect(PingFormat.milliseconds(14.6) == "15", "slower round trips are whole milliseconds")
+        suite.expect(PingFormat.menuBarValue(0.0146) == "15ms", "the menu bar value is compact")
+        suite.expect(PingFormat.menuBarValue(nil) == "–", "no reply yet reads as a dash")
+        suite.expect(PingFormat.percent(0) == "0%" && PingFormat.percent(0.005) == "0.5%" && PingFormat.percent(0.25) == "25%",
+                     "loss keeps a decimal only below one percent")
+        suite.expect(PingFormat.summary([3, 4, 11]) == "3.0/6.0/11", "summary is min/avg/max")
+        suite.expect(PingFormat.summary([]) == nil, "no answers, no summary")
+        MetricFormat.locale = Locale(identifier: "de_DE")
+        suite.expect(PingFormat.milliseconds(3.24) == "3,2", "milliseconds follow the region's decimal mark")
+        MetricFormat.locale = .current
+    }
+
     private static func framing(_ suite: TestSuite) {
         let payload: [UInt8] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
         let v4 = ICMPEcho.request(identifier: 0xBEEF, sequence: 0x0102, payload: payload, ipv6: false)
@@ -250,5 +310,13 @@ enum PingTrackerTests {
         var neighbor = v6Reply
         neighbor[0] = 135
         suite.expect(ICMPEcho.parseReply(neighbor, ipv6: true) == nil, "other ICMPv6 messages are ignored")
+    }
+
+    private static func strings(_ suite: TestSuite) {
+        let english = FeatureStrings.ping(.enUS)
+        for language in AppLanguage.allCases {
+            LocalizationTests.check(FeatureStrings.ping(language), against: english,
+                                    name: "ping/\(language.rawValue)", suite: suite)
+        }
     }
 }

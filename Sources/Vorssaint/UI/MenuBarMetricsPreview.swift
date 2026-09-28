@@ -24,6 +24,8 @@ struct MenuBarMetricsPreview: View {
     @AppStorage(DefaultsKey.menuBarPower) private var power = false
     @AppStorage(DefaultsKey.menuBarFanSpeed) private var fanSpeed = false
     @AppStorage(DefaultsKey.menuBarConnectedDevices) private var connectedDevices = false
+    @AppStorage(DefaultsKey.menuBarPing) private var ping = false
+    @AppStorage(DefaultsKey.menuBarPingTarget) private var pingTarget = PingTargets.defaultMenuBarTarget
     @AppStorage(DefaultsKey.menuBarMetricOrder) private var metricOrder = ""
     @AppStorage(DefaultsKey.menuBarCombineTemperatures) private var combineTemperatures = true
     @AppStorage(DefaultsKey.menuBarMetricAppearance) private var metricAppearance = "values"
@@ -56,6 +58,7 @@ struct MenuBarMetricsPreview: View {
         let _ = diskStyle
         let _ = temperatureUnit
         let _ = metricSpacing
+        let _ = pingTarget
         let metrics = activeMetrics
         let lines = separateMetrics ? [] : MenuBarRenderer.lines(for: monitor.snapshot, metrics: metrics)
         // Separate items are their own status items, which macOS seats to
@@ -134,6 +137,7 @@ struct MenuBarMetricsPreview: View {
         let _ = power
         let _ = fanSpeed
         let _ = connectedDevices
+        let _ = ping
         return MenuBarMetric.enabled(in: .standard)
     }
 
@@ -184,6 +188,20 @@ struct MenuBarMetricsPreview: View {
             .frame(width: MenuBarRenderer.rateBlockWidth(style: style),
                    height: style == .readable ? 22 : 20,
                    alignment: .center)
+        case let .pingBlock(label, value, graph, state, style):
+            HStack(spacing: 4) {
+                PingGraphShape(values: graph)
+                    .stroke(state == .down ? Color.red : Color.white,
+                            style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                    .frame(width: MenuBarRenderer.pingGraphSize(style: style).width,
+                           height: MenuBarRenderer.pingGraphSize(style: style).height)
+                metricBlock(label: label,
+                            value: value,
+                            minimumValue: "99.9ms",
+                            style: style,
+                            pressure: nil)
+            }
+            .fixedSize(horizontal: true, vertical: true)
         case let .diskActivityBlock(read, write, style):
             VStack(alignment: .trailing, spacing: -0.6) {
                 Text("R\(read)")
