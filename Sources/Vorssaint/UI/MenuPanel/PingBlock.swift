@@ -115,7 +115,7 @@ struct PingBlock: View {
                                          ? AnyShapeStyle(PanelMetricColor.red(for: colorScheme))
                                          : AnyShapeStyle(.tertiary))
                     if let summary = PingFormat.summary(reading.answeredMilliseconds) {
-                        Text(summary + " ms")
+                        Text(summary)
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -164,13 +164,15 @@ struct PingBlock: View {
                         .foregroundStyle(PanelMetricColor.red(for: colorScheme))
                 } else if let rtt = reading.lastRTT {
                     HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        Text(PingFormat.milliseconds(rtt * 1000))
+                        Text(PingFormat.value(rtt, inSeconds: reading.showsSeconds))
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .contentTransition(.numericText())
-                        Text("ms")
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(.tertiary)
+                        if !reading.showsSeconds {
+                            Text("ms")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     .foregroundStyle(reading.state == .suspect ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 } else {

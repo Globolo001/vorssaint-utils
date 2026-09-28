@@ -290,31 +290,57 @@ enum PingTrackerTests {
         suite.expect(!unresolved.isUnreachable, "a name still resolving is not yet unreachable")
 
         MetricFormat.locale = Locale(identifier: "en_US")
-        suite.expect(PingFormat.milliseconds(3.24) == "3.2", "fast round trips keep one decimal")
-        suite.expect(PingFormat.milliseconds(14.6) == "15", "slower round trips are whole milliseconds")
-        suite.expect(PingFormat.menuBarValue(0.0146) == "15" && PingFormat.menuBarValue(0.0042) == "4",
-                     "the menu bar value is whole milliseconds without a unit")
-        suite.expect(PingFormat.menuBarValue(0.0002) == "<1", "a sub-millisecond reply never reads as zero")
-        suite.expect(PingFormat.menuBarValue(0.9994) == "999",
-                     "the menu bar value stays whole milliseconds up to three digits")
-        suite.expect(PingFormat.menuBarValue(0.9996) == "1k" && PingFormat.menuBarValue(2.7) == "2k"
-                        && PingFormat.menuBarValue(12.7) == "12k" && PingFormat.menuBarValue(250) == "99k",
-                     "from one second the menu bar value is whole thousands, capped at 99k")
-        suite.expect([0.0001, 0.0042, 0.0999, 0.5, 0.9994, 3.0, 9.9994, 29.9, 99.9, 500].allSatisfy { PingFormat.menuBarValue($0).count <= 3 },
-                     "every menu bar value fits three characters")
+        suite.expect(PingFormat.value(0.0146) == "15" && PingFormat.value(0.0042) == "4"
+                        && PingFormat.value(0.281) == "281" && PingFormat.value(0.9994) == "999",
+                     "under a second the value is whole milliseconds without a unit")
+        suite.expect(PingFormat.value(0.0002) == "<1", "a sub-millisecond reply never reads as zero")
+        suite.expect(PingFormat.value(0.9996) == "1.00s" && PingFormat.value(1) == "1.00s"
+                        && PingFormat.value(3.12) == "3.12s" && PingFormat.value(9.994) == "9.99s",
+                     "from one second the value is seconds with two decimals")
+        suite.expect(PingFormat.value(9.996) == "10.0s" && PingFormat.value(10.4) == "10.4s"
+                        && PingFormat.value(99.94) == "99.9s",
+                     "from ten seconds the value keeps three significant digits")
+        suite.expect(PingFormat.value(99.96) == "100s" && PingFormat.value(104) == "104s"
+                        && PingFormat.value(998.4) == "998s" && PingFormat.value(5000) == "999s",
+                     "from a hundred seconds the value is whole seconds, capped at 999s")
+        let range = [0.0] + (0..<17_000).map { 0.0001 * pow(1.001, Double($0)) }
+        suite.expect(range.allSatisfy { seconds in
+            [false, true].allSatisfy { mode in
+                PingFormat.value(seconds, inSeconds: mode).count <= 5
+            }
+        }, "every value across the range fits five characters")
+        suite.expect(PingFormat.value(0.985, inSeconds: true) == "0.98s" && PingFormat.value(0.9904, inSeconds: true) == "0.99s"
+                        && PingFormat.value(0.985, inSeconds: false) == "985",
+                     "between 980 and 999 ms the mode picks the unit")
+        suite.expect(PingFormat.value(1.2, inSeconds: false) == "1.20s" && PingFormat.value(0.3, inSeconds: true) == "300",
+                     "outside the crossing the value alone picks the unit")
+        var seconds = false
+        var shown: [String] = []
+        for rtt in [0.2, 0.99, 0.9994, 0.9995, 1.4, 0.99, 0.985, 0.98, 0.9799, 0.99, 0.5] {
+            seconds = PingFormat.showsSeconds(rtt, previously: seconds)
+            shown.append(PingFormat.value(rtt, inSeconds: seconds))
+        }
+        suite.expect(shown == ["200", "990", "999", "1.00s", "1.40s", "0.99s", "0.98s", "0.98s", "980", "990", "500"],
+                     "seconds start at 1000 ms and only give way below 980 ms")
+        suite.expect(PingFormat.showsSeconds(nil, previously: true) && !PingFormat.showsSeconds(.nan, previously: false),
+                     "no reply keeps the current unit")
+        suite.expect(PingFormat.menuBarReserves.contains("88.8s"), "the menu bar column is sized for the widest value")
         suite.expect(PingFormat.menuBarLabel == "PING", "the menu bar label carries no unit")
         suite.expect(PingFormat.menuBarReserves.contains(PingFormat.menuBarDown),
                      "the down mark fits the reserved value column")
         suite.expect(PingMenuBarStyle(rawValue: "status") == .status && PingMenuBarStyle(rawValue: "graph") == .graph
                         && PingMenuBarStyle(rawValue: "dot") == nil,
                      "the menu bar ping style has a status and a graph mode")
-        suite.expect(PingFormat.menuBarValue(nil) == "–", "no reply yet reads as a dash")
+        suite.expect(PingFormat.value(nil) == "–" && PingFormat.value(nil, inSeconds: true) == "–",
+                     "no reply yet reads as a dash")
         suite.expect(PingFormat.percent(0) == "0%" && PingFormat.percent(0.005) == "0.5%" && PingFormat.percent(0.25) == "25%",
                      "loss keeps a decimal only below one percent")
-        suite.expect(PingFormat.summary([3, 4, 11]) == "3.0/6.0/11", "summary is min/avg/max")
+        suite.expect(PingFormat.summary([3, 4, 11]) == "3/6/11 ms", "summary is min/avg/max")
+        suite.expect(PingFormat.summary([12, 300, 1500]) == "12/604/1.50s",
+                     "a summary reaching a second drops the shared ms unit")
         suite.expect(PingFormat.summary([]) == nil, "no answers, no summary")
         MetricFormat.locale = Locale(identifier: "de_DE")
-        suite.expect(PingFormat.milliseconds(3.24) == "3,2", "milliseconds follow the region's decimal mark")
+        suite.expect(PingFormat.value(3.12) == "3,12s", "seconds follow the region’s decimal mark")
         MetricFormat.locale = .current
     }
 

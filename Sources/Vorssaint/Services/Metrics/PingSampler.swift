@@ -58,6 +58,7 @@ final class PingSampler {
         reading.problem = target.problem
         reading.state = target.tracker.state
         reading.lastRTT = target.lastRTT
+        reading.showsSeconds = target.showsSeconds
         reading.smoothedRTT = target.tracker.estimator.smoothedRTT
         let window = target.history.window(now: now, slotSeconds: slotSeconds)
         reading.slotSeconds = slotSeconds
@@ -185,6 +186,7 @@ private final class PingTarget {
     var history = PingHistory()
     var sequence: UInt16 = 0
     var lastRTT: TimeInterval?
+    var showsSeconds = false
     var problem: PingReading.Problem?
     var lookedUpAt: TimeInterval = -.infinity
     var lookupInFlight = false
@@ -198,7 +200,10 @@ private final class PingTarget {
 
     func record(_ outcome: PingTracker.Outcome) {
         history.record(outcome.sample)
-        if let rtt = outcome.sample.rtt { lastRTT = rtt }
+        if let rtt = outcome.sample.rtt {
+            lastRTT = rtt
+            showsSeconds = PingFormat.showsSeconds(rtt, previously: showsSeconds)
+        }
     }
 
     func finishLookup(_ address: PingAddress?) {

@@ -1327,7 +1327,7 @@ enum MenuBarRenderer {
         if reading.isUnreachable {
             return PingFormat.menuBarDown
         }
-        return PingFormat.menuBarValue(reading.lastRTT)
+        return PingFormat.value(reading.lastRTT, inSeconds: reading.showsSeconds)
     }
 
     private static func diskActivityBlockImage(read: String,
@@ -1461,7 +1461,8 @@ enum MenuBarRenderer {
         snapshot.netUpBytesPerSec = 1_000_000_000
         var ping = PingReading(host: PingHost.gateway)
         ping.state = .up
-        ping.lastRTT = 0.999
+        ping.lastRTT = 10.4
+        ping.showsSeconds = true
         let slots = PingHistory.slotCount(span: PingHistory.span, slotSeconds: ping.slotSeconds)
         ping.rttHistory = Array(repeating: 999, count: slots)
         ping.lostHistory = Array(repeating: 0, count: slots)

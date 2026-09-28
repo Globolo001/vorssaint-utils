@@ -106,6 +106,7 @@ struct PingReading: Equatable {
     var address: String?
     var state: PingTracker.State = .unknown
     var lastRTT: TimeInterval?
+    var showsSeconds = false
     var smoothedRTT: TimeInterval?
     var lossRatio: Double = 0
     var problem: Problem?
@@ -154,24 +155,35 @@ enum PingMenuBarStyle: String, CaseIterable {
 }
 
 enum PingFormat {
-    static func milliseconds(_ value: Double) -> String {
-        guard value.isFinite, value >= 0 else { return "–" }
-        return value < 10
-            ? String(format: "%.1f", locale: MetricFormat.locale, value)
-            : String(format: "%.0f", locale: MetricFormat.locale, value.rounded())
+    static let secondsFromMilliseconds: Double = 999.5
+    static let millisecondsBelow: Double = 980
+
+    static func showsSeconds(_ seconds: TimeInterval?, previously: Bool) -> Bool {
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return previously }
+        let milliseconds = seconds * 1000
+        if milliseconds >= secondsFromMilliseconds { return true }
+        if milliseconds < millisecondsBelow { return false }
+        return previously
+    }
+
+    static func value(_ seconds: TimeInterval?, inSeconds: Bool) -> String {
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return "–" }
+        guard showsSeconds(seconds, previously: inSeconds) else {
+            let milliseconds = seconds * 1000
+            return milliseconds < 0.5 ? "<1" : String(Int(milliseconds.rounded()))
+        }
+        if seconds < 9.995 { return String(format: "%.2fs", locale: MetricFormat.locale, seconds) }
+        if seconds < 99.95 { return String(format: "%.1fs", locale: MetricFormat.locale, seconds) }
+        return "\(min(999, Int(seconds.rounded())))s"
+    }
+
+    static func value(_ seconds: TimeInterval?) -> String {
+        value(seconds, inSeconds: showsSeconds(seconds, previously: false))
     }
 
     static let menuBarLabel = "PING"
     static let menuBarDown = "—"
-    static let menuBarReserves = ["888", "88k", menuBarDown]
-
-    static func menuBarValue(_ seconds: TimeInterval?) -> String {
-        guard let seconds, seconds.isFinite, seconds >= 0 else { return "–" }
-        let value = seconds * 1000
-        if value < 0.5 { return "<1" }
-        if value < 999.5 { return String(Int(value.rounded())) }
-        return "\(min(99, max(1, Int(value / 1000))))k"
-    }
+    static let menuBarReserves = ["888", "8.88s", "88.8s", "888s", menuBarDown]
 
     static func percent(_ ratio: Double) -> String {
         let value = max(0, min(1, ratio)) * 100
@@ -183,7 +195,9 @@ enum PingFormat {
     static func summary(_ milliseconds: [Double]) -> String? {
         guard let low = milliseconds.min(), let high = milliseconds.max(), !milliseconds.isEmpty else { return nil }
         let average = milliseconds.reduce(0, +) / Double(milliseconds.count)
-        return [low, average, high].map(self.milliseconds).joined(separator: "/")
+        let values = [low, average, high].map { value($0 / 1000) }
+        let unit = high < secondsFromMilliseconds ? " ms" : ""
+        return values.joined(separator: "/") + unit
     }
 }
 
