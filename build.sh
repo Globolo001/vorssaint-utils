@@ -502,6 +502,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Metrics/MaxCapacityProbe.swift
         Sources/Vorssaint/Services/Metrics/TemperatureSensorSelector.swift
         Sources/Vorssaint/Services/Metrics/SustainedAlertGate.swift
+        Sources/Vorssaint/Services/Ping/PingSupport.swift
         Sources/Vorssaint/Services/WindowLayout/WindowLayoutSupport.swift
         Sources/Vorssaint/Services/WindowLayout/WindowGestureSupport.swift
         Sources/Vorssaint/Core/WindowDirectionalStrings.swift
