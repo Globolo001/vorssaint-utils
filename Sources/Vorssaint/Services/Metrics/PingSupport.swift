@@ -163,14 +163,14 @@ enum PingFormat {
 
     static let menuBarLabel = "PING"
     static let menuBarDown = "—"
-    static let menuBarReserves = ["8888", "88k", menuBarDown]
+    static let menuBarReserves = ["888", "88k", menuBarDown]
 
     static func menuBarValue(_ seconds: TimeInterval?) -> String {
         guard let seconds, seconds.isFinite, seconds >= 0 else { return "–" }
         let value = seconds * 1000
         if value < 0.5 { return "<1" }
-        if value < 9999.5 { return String(Int(value.rounded())) }
-        return "\(max(10, Int(value / 1000)))k"
+        if value < 999.5 { return String(Int(value.rounded())) }
+        return "\(min(99, max(1, Int(value / 1000))))k"
     }
 
     static func percent(_ ratio: Double) -> String {
