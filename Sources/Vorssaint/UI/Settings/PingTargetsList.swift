@@ -6,7 +6,7 @@ import SwiftUI
 struct PingTargetsList: View {
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.pingTargets) private var targetsRaw = PingTargets.defaultList
-    @State private var isExpanded = false
+    @State private var isExpanded: Bool
     @State private var customDraft = ""
     @State private var showingCustomField = false
     @State private var invalidDraft = false
@@ -16,6 +16,11 @@ struct PingTargetsList: View {
     }
 
     private var hosts: [PingHost] { PingTargets.hosts(from: targetsRaw) }
+
+    init() {
+        let raw = UserDefaults.standard.string(forKey: DefaultsKey.pingTargets) ?? PingTargets.defaultList
+        _isExpanded = State(initialValue: !PingTargets.hosts(from: raw).isEmpty)
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {

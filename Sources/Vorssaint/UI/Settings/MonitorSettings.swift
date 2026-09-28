@@ -500,6 +500,9 @@ private struct PingMenuBarOrderOption: View {
                 .controlSize(.small)
             }
         }
+        if menuBarPing {
+            PingTargetsList()
+        }
     }
 
     private func selection(in hosts: [PingHost]) -> Binding<String> {
