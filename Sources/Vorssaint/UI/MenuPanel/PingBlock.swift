@@ -37,12 +37,7 @@ struct PingBlock: View {
     @ObservedObject private var monitor = SystemMonitor.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DefaultsKey.pingTargets) private var targetsRaw = PingTargets.defaultList
-    @AppStorage(DefaultsKey.menuBarPing) private var menuBarPing = false
-    @AppStorage(DefaultsKey.menuBarPingTarget) private var menuBarTarget = PingTargets.defaultMenuBarTarget
-    @State private var adding = false
-    @State private var draft = ""
-    @State private var invalidDraft = false
-    @State private var hovered: PingHost?
+    @AppStorage(DefaultsKey.monitorGraphNetwork) private var showGraph = true
 
     private var strings: PingFeatureStrings { FeatureStrings.ping(l10n.language) }
     private var hosts: [PingHost] { PingTargets.hosts(from: targetsRaw) }
@@ -56,32 +51,18 @@ struct PingBlock: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Text(strings.title)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
-                    Button {
-                        adding.toggle()
-                        draft = ""
-                        invalidDraft = false
-                    } label: {
-                        Image(systemName: adding ? "xmark" : "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 18, height: 16)
-                            .contentShape(Rectangle())
+                    if hosts.isEmpty {
+                        statusText(strings.noTargets)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help(strings.addTarget)
-                    .disabled(!adding && hosts.count >= PingTargets.maximumCount)
                     if editing {
                         PanelInlineHideButton(isVisible: $isVisible)
                     }
                 }
                 ForEach(hosts, id: \.self) { host in
                     row(host)
-                }
-                if adding {
-                    addField
                 }
             }
         }
@@ -112,13 +93,9 @@ struct PingBlock: View {
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 4)
-                if hovered == host {
-                    actions(for: host)
-                } else {
-                    value(for: reading)
-                }
+                value(for: reading)
             }
-            if values.count >= 2 {
+            if showGraph, values.count >= 2 {
                 Sparkline(values: values,
                           color: graphColor(reading),
                           maxValue: max(20, (values.filter(\.isFinite).max() ?? 0) * 1.1),
@@ -141,14 +118,6 @@ struct PingBlock: View {
                 }
                 .font(.system(size: 9.5, design: .monospaced))
                 .monospacedDigit()
-            }
-        }
-        .contentShape(Rectangle())
-        .onHover { inside in
-            if inside {
-                hovered = host
-            } else if hovered == host {
-                hovered = nil
             }
         }
     }
@@ -200,7 +169,7 @@ struct PingBlock: View {
                 } else if let rtt = reading.lastRTT {
                     HStack(alignment: .firstTextBaseline, spacing: 1) {
                         Text(PingFormat.milliseconds(rtt * 1000))
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .contentTransition(.numericText())
                         Text("ms")
@@ -222,85 +191,5 @@ struct PingBlock: View {
             .font(.system(size: 10.5))
             .foregroundStyle(.tertiary)
             .lineLimit(1)
-    }
-
-    private func actions(for host: PingHost) -> some View {
-        let pinned = menuBarPing && menuBarTarget == host.text
-        return HStack(spacing: 2) {
-            Button {
-                menuBarTarget = host.text
-                menuBarPing = true
-                SystemMonitor.shared.planDidChange()
-            } label: {
-                Image(systemName: pinned ? "menubar.rectangle" : "menubar.arrow.up.rectangle")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .frame(width: 20, height: 16)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(pinned ? Color.accentColor : Color.secondary)
-            .help(pinned ? strings.shownInMenuBar : strings.showInMenuBar)
-            Button {
-                targetsRaw = PingTargets.removing(host, from: targetsRaw)
-                hovered = nil
-                SystemMonitor.shared.planDidChange()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 20, height: 16)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(strings.remove)
-        }
-    }
-
-    private var addField: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            TextField(strings.targetPlaceholder, text: $draft)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .font(.system(size: 11))
-                .onSubmit { add(draft) }
-                .onChange(of: draft) { _, _ in invalidDraft = false }
-            if invalidDraft {
-                Text(strings.invalidTarget)
-                    .font(.system(size: 10))
-                    .foregroundStyle(PanelMetricColor.red(for: colorScheme))
-            }
-            HStack(spacing: 4) {
-                ForEach(suggestions, id: \.self) { host in
-                    Button {
-                        add(host.text)
-                    } label: {
-                        Text(name(of: host))
-                            .font(.system(size: 10, weight: .medium))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.secondary.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private var suggestions: [PingHost] {
-        [PingHost.gateway, PingHost("1.1.1.1"), PingHost("8.8.8.8")]
-            .compactMap { $0 }
-            .filter { !hosts.contains($0) }
-    }
-
-    private func add(_ text: String) {
-        guard let host = PingHost(text) else {
-            invalidDraft = true
-            return
-        }
-        targetsRaw = PingTargets.adding(host, to: targetsRaw)
-        draft = ""
-        adding = false
-        SystemMonitor.shared.planDidChange()
     }
 }

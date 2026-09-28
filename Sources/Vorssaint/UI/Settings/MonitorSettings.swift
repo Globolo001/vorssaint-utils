@@ -372,6 +372,7 @@ private struct MenuBarMetricTiles: View {
             MemoryMenuBarOrderOption()
             NetworkMenuBarOrderOption()
             DiskMenuBarOrderOption()
+            PingMenuBarOrderOption()
         }
         .onAppear { order = MenuBarMetric.order(in: .standard) }
         .onChange(of: order) { _, order in
@@ -463,6 +464,35 @@ private struct DiskMenuBarOrderOption: View {
                 .controlSize(.small)
             }
         }
+    }
+}
+
+private struct PingMenuBarOrderOption: View {
+    @ObservedObject private var l10n = L10n.shared
+    @AppStorage(DefaultsKey.menuBarPing) private var menuBarPing = false
+    @AppStorage(DefaultsKey.menuBarPingTarget) private var target = PingTargets.defaultMenuBarTarget
+    @AppStorage(DefaultsKey.pingTargets) private var targetsRaw = PingTargets.defaultList
+
+    var body: some View {
+        let strings = FeatureStrings.ping(l10n.language)
+        let hosts = PingTargets.hosts(from: targetsRaw)
+        if menuBarPing, !hosts.isEmpty {
+            SettingsRow(symbol: MenuBarMetric.ping.symbolName, title: strings.menuBarTarget) {
+                Picker(strings.menuBarTarget, selection: selection(in: hosts)) {
+                    ForEach(hosts, id: \.self) { host in
+                        Text(host.kind == .gateway ? strings.router : host.text).tag(host.text)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func selection(in hosts: [PingHost]) -> Binding<String> {
+        Binding(get: { hosts.contains { $0.text == target } ? target : hosts[0].text },
+                set: { target = $0 })
     }
 }
 

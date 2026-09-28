@@ -87,6 +87,9 @@ struct MonitorPanelConfig: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 8)], spacing: 8) {
                         itemTiles(for: block)
                     }
+                    if block == .network {
+                        PingTargetsList()
+                    }
                 }
             }
         }
@@ -183,6 +186,9 @@ struct MonitorPanelConfig: View {
             block(.network, title: l10n.s.networkSection, master: $showNetwork) {
                 Toggle(l10n.s.monitorItemNetSpeed, isOn: $netSpeed)
                 Toggle(FeatureStrings.ping(l10n.language).title, isOn: $netPing)
+                if netPing {
+                    PingTargetsList()
+                }
                 Toggle(l10n.s.networkApps, isOn: $netApps)
                 Toggle(l10n.s.monitorItemNetTotals, isOn: $netTotals)
                 Toggle(l10n.s.networkIPAddresses, isOn: $netAddresses)
