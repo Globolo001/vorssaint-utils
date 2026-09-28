@@ -1198,12 +1198,11 @@ enum MenuBarRenderer {
         CGSize(width: style == .readable ? 20 : 18, height: style == .readable ? 13 : 12)
     }
 
-    static func pingPressure(_ state: PingTracker.State) -> MemoryPressure {
+    static func pingLevel(_ state: PingTracker.State) -> MenuBarUsageBarSupport.Level? {
         switch state {
-        case .up: return .normal
-        case .suspect: return .warning
+        case .suspect: return .elevated
         case .down: return .critical
-        case .unknown: return .unknown
+        case .up, .unknown: return nil
         }
     }
 
@@ -1214,7 +1213,8 @@ enum MenuBarRenderer {
                                        mode: PingMenuBarStyle,
                                        style: MenuBarBlockStyle) -> NSImage {
         let graphKey = graph.map { $0.isFinite ? String(Int($0.rounded())) : "x" }.joined(separator: ",")
-        let cacheKey = "ping|\(label)|\(value)|\(state)|\(mode)|\(style)|\(graphKey)" as NSString
+        let tintHex = pingLevel(state).map { MenuBarUsageBarSupport.currentColorHex(for: $0) }
+        let cacheKey = "ping|\(label)|\(value)|\(state)|\(tintHex ?? "none")|\(mode)|\(style)|\(graphKey)" as NSString
         if let cached = blockImageCache.object(forKey: cacheKey) { return cached }
 
         let labelFont = NSFont.systemFont(ofSize: style == .readable ? 7.2 : 6.6, weight: .medium)
@@ -1248,26 +1248,11 @@ enum MenuBarRenderer {
                                      withAttributes: dynamicTextAttributes(font: labelFont))
             let columnX = tileX + (tileWidth - columnWidth) / 2
             var valueAttrs = dynamicTextAttributes(font: valueFont)
-            switch state {
-            case .down: valueAttrs[.foregroundColor] = NSColor.systemRed
-            case .suspect: valueAttrs[.foregroundColor] = NSColor.secondaryLabelColor
-            case .up, .unknown: break
+            if let tintHex {
+                valueAttrs[.foregroundColor] = usageBarColor(hex: tintHex)
             }
             (value as NSString).draw(at: NSPoint(x: columnX + columnWidth - valueSize.width, y: valueY),
                                      withAttributes: valueAttrs)
-            guard state != .unknown else { return true }
-            let thickness: CGFloat = 1.1
-            let lineY = max(thickness / 2, valueY - valueFont.descender - 1 - thickness / 2)
-            let underline = NSBezierPath()
-            underline.move(to: NSPoint(x: columnX + thickness / 2, y: lineY))
-            underline.line(to: NSPoint(x: columnX + columnWidth - thickness / 2, y: lineY))
-            underline.lineWidth = thickness
-            underline.lineCapStyle = .round
-            if state == .suspect {
-                underline.setLineDash([2.2, 1.6], count: 2, phase: 0)
-            }
-            nsColor(for: pingPressure(state)).setStroke()
-            underline.stroke()
             return true
         }
         image.isTemplate = false

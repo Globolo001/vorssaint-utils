@@ -282,19 +282,8 @@ struct MenuBarMetricsPreview: View {
                 .font(.system(size: style == .readable ? 13 : 12,
                               weight: .semibold,
                               design: .monospaced))
-                .foregroundStyle(state == .down ? Color.red : state == .suspect ? Color.white.opacity(0.55) : Color.white)
+                .foregroundStyle(MenuBarRenderer.pingLevel(state).map(levelColor) ?? Color.white)
                 .frame(minWidth: style == .readable ? 39 : 36, alignment: .trailing)
-                .overlay(alignment: .bottom) {
-                    if state != .unknown {
-                        PingUnderline()
-                            .stroke(dotColor(MenuBarRenderer.pingPressure(state)),
-                                    style: StrokeStyle(lineWidth: 1.1,
-                                                       lineCap: .round,
-                                                       dash: state == .suspect ? [2.2, 1.6] : []))
-                            .frame(height: 1.1)
-                            .offset(y: 0.5)
-                    }
-                }
         }
         .foregroundStyle(.white)
         .fixedSize(horizontal: true, vertical: true)
@@ -352,7 +341,10 @@ struct MenuBarMetricsPreview: View {
     }
 
     private func usageBarColor(for fraction: Double) -> Color {
-        let level = MenuBarUsageBarSupport.currentLevel(for: fraction)
+        levelColor(MenuBarUsageBarSupport.currentLevel(for: fraction))
+    }
+
+    private func levelColor(_ level: MenuBarUsageBarSupport.Level) -> Color {
         let hex = MenuBarUsageBarSupport.currentColorHex(for: level)
         let rgb = MenuBarUsageBarSupport.rgb(for: hex,
                                              fallback: MenuBarUsageBarSupport.defaultNormalColor)
@@ -395,11 +387,3 @@ struct MenuBarMetricsPreview: View {
     }
 }
 
-private struct PingUnderline: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        return path
-    }
-}
