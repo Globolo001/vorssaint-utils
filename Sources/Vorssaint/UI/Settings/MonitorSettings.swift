@@ -481,7 +481,7 @@ private struct PingMenuBarOrderOption: View {
     @AppStorage(DefaultsKey.menuBarPing) private var menuBarPing = false
     @AppStorage(DefaultsKey.menuBarPingTarget) private var target = PingTargets.defaultMenuBarTarget
     @AppStorage(DefaultsKey.pingTargets) private var targetsRaw = PingTargets.defaultList
-    @AppStorage(DefaultsKey.menuBarPingStyle) private var pingStyle = PingMenuBarStyle.graph
+    @AppStorage(DefaultsKey.menuBarPingStyle) private var pingStyle = PingMenuBarStyle.status
 
     var body: some View {
         let strings = FeatureStrings.ping(l10n.language)
@@ -489,8 +489,8 @@ private struct PingMenuBarOrderOption: View {
         if menuBarPing {
             SettingsRow(symbol: MenuBarMetric.ping.symbolName, title: strings.displayLabel) {
                 Picker(strings.displayLabel, selection: $pingStyle) {
+                    Text(strings.displayStatus).tag(PingMenuBarStyle.status)
                     Text(strings.displayGraph).tag(PingMenuBarStyle.graph)
-                    Text(strings.displayDot).tag(PingMenuBarStyle.dot)
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)

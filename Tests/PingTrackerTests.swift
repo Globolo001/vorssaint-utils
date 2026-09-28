@@ -299,10 +299,12 @@ enum PingTrackerTests {
                      "the menu bar value is capped at three digits")
         suite.expect([0.0001, 0.0042, 0.0999, 0.5, 0.9994, 3.0].allSatisfy { PingFormat.menuBarValue($0).count <= 3 },
                      "every menu bar value fits three characters")
-        suite.expect(PingFormat.menuBarLabel == "PING MS", "the unit sits in the menu bar label")
-        suite.expect(PingMenuBarStyle(rawValue: "graph") == .graph && PingMenuBarStyle(rawValue: "dot") == .dot
-                        && PingMenuBarStyle(rawValue: "bars") == nil,
-                     "the menu bar ping style has a graph and a dot mode")
+        suite.expect(PingFormat.menuBarLabel == "PING", "the menu bar label carries no unit")
+        suite.expect(PingFormat.menuBarReserves.contains(PingFormat.menuBarDown),
+                     "the down mark fits the reserved value column")
+        suite.expect(PingMenuBarStyle(rawValue: "status") == .status && PingMenuBarStyle(rawValue: "graph") == .graph
+                        && PingMenuBarStyle(rawValue: "dot") == nil,
+                     "the menu bar ping style has a status and a graph mode")
         suite.expect(PingFormat.menuBarValue(nil) == "–", "no reply yet reads as a dash")
         suite.expect(PingFormat.percent(0) == "0%" && PingFormat.percent(0.005) == "0.5%" && PingFormat.percent(0.25) == "25%",
                      "loss keeps a decimal only below one percent")

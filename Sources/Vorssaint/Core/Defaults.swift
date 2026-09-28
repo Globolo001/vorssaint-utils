@@ -1457,7 +1457,7 @@ enum Defaults {
         DefaultsKey.menuBarFanSpeed: false,
         DefaultsKey.menuBarPing: false,
         DefaultsKey.menuBarPingTarget: PingTargets.defaultMenuBarTarget,
-        DefaultsKey.menuBarPingStyle: PingMenuBarStyle.graph.rawValue,
+        DefaultsKey.menuBarPingStyle: PingMenuBarStyle.status.rawValue,
         DefaultsKey.pingTargets: PingTargets.defaultList,
         DefaultsKey.menuBarPreset: "dense",
         DefaultsKey.menuBarMetricSpacing: "compact",  // owner's call: compact by default in 3.1.8

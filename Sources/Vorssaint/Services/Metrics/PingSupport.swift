@@ -146,10 +146,10 @@ struct PingReading: Equatable {
 }
 
 enum PingMenuBarStyle: String, CaseIterable {
-    case graph, dot
+    case status, graph
 
     static var current: PingMenuBarStyle {
-        PingMenuBarStyle(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.menuBarPingStyle) ?? "") ?? .graph
+        PingMenuBarStyle(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.menuBarPingStyle) ?? "") ?? .status
     }
 }
 
@@ -161,8 +161,9 @@ enum PingFormat {
             : String(format: "%.0f", locale: MetricFormat.locale, value.rounded())
     }
 
-    static let menuBarLabel = "PING MS"
-    static let menuBarReserves = ["888", ">1s"]
+    static let menuBarLabel = "PING"
+    static let menuBarDown = "—"
+    static let menuBarReserves = ["888", ">1s", menuBarDown]
 
     static func menuBarValue(_ seconds: TimeInterval?) -> String {
         guard let seconds, seconds.isFinite, seconds >= 0 else { return "–" }

@@ -9,7 +9,6 @@ struct PingFeatureStrings {
     let targetPlaceholder: String
     let router: String
     let down: String
-    let menuBarDown: String
     let resolving: String
     let unresolved: String
     let unavailable: String
@@ -22,7 +21,7 @@ struct PingFeatureStrings {
     let noTargets: String
     let displayLabel: String
     let displayGraph: String
-    let displayDot: String
+    let displayStatus: String
 }
 
 extension FeatureStrings {
@@ -54,7 +53,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Host, domain or IP",
         router: "Router",
         down: "Down",
-        menuBarDown: "DOWN",
         resolving: "Resolving…",
         unresolved: "Can’t resolve",
         unavailable: "Ping unavailable",
@@ -67,7 +65,7 @@ extension PingFeatureStrings {
         noTargets: "No ping targets",
         displayLabel: "Ping display",
         displayGraph: "Graph",
-        displayDot: "Status dot"
+        displayStatus: "Status"
     )
 
     static let ptBR = PingFeatureStrings(
@@ -76,7 +74,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Host, domínio ou IP",
         router: "Roteador",
         down: "Inativo",
-        menuBarDown: "OFF",
         resolving: "Resolvendo…",
         unresolved: "Não foi possível resolver",
         unavailable: "Ping indisponível",
@@ -89,7 +86,7 @@ extension PingFeatureStrings {
         noTargets: "Nenhum destino de ping",
         displayLabel: "Exibição do ping",
         displayGraph: "Gráfico",
-        displayDot: "Ponto de status"
+        displayStatus: "Status"
     )
 
     static let tr = PingFeatureStrings(
@@ -98,7 +95,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Ana makine, alan adı veya IP",
         router: "Yönlendirici",
         down: "Kapalı",
-        menuBarDown: "YOK",
         resolving: "Çözümleniyor…",
         unresolved: "Çözümlenemiyor",
         unavailable: "Ping kullanılamıyor",
@@ -111,7 +107,7 @@ extension PingFeatureStrings {
         noTargets: "Ping hedefi yok",
         displayLabel: "Ping görünümü",
         displayGraph: "Grafik",
-        displayDot: "Durum noktası"
+        displayStatus: "Durum"
     )
 
     static let ru = PingFeatureStrings(
@@ -120,7 +116,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Хост, домен или IP",
         router: "Роутер",
         down: "Недоступен",
-        menuBarDown: "НЕТ",
         resolving: "Определение адреса…",
         unresolved: "Не удаётся определить адрес",
         unavailable: "Пинг недоступен",
@@ -133,7 +128,7 @@ extension PingFeatureStrings {
         noTargets: "Нет узлов для пинга",
         displayLabel: "Отображение пинга",
         displayGraph: "График",
-        displayDot: "Индикатор состояния"
+        displayStatus: "Статус"
     )
 
     static let es = PingFeatureStrings(
@@ -142,7 +137,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Host, dominio o IP",
         router: "Router",
         down: "Caído",
-        menuBarDown: "CAÍDO",
         resolving: "Resolviendo…",
         unresolved: "No se puede resolver",
         unavailable: "Ping no disponible",
@@ -155,7 +149,7 @@ extension PingFeatureStrings {
         noTargets: "No hay destinos de ping",
         displayLabel: "Visualización del ping",
         displayGraph: "Gráfico",
-        displayDot: "Punto de estado"
+        displayStatus: "Estado"
     )
 
     static let sk = PingFeatureStrings(
@@ -164,7 +158,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Hostiteľ, doména alebo IP",
         router: "Smerovač",
         down: "Nedostupný",
-        menuBarDown: "VYP",
         resolving: "Prekladá sa…",
         unresolved: "Nedá sa preložiť",
         unavailable: "Ping nie je dostupný",
@@ -177,7 +170,7 @@ extension PingFeatureStrings {
         noTargets: "Žiadne ciele pingu",
         displayLabel: "Zobrazenie pingu",
         displayGraph: "Graf",
-        displayDot: "Stavová bodka"
+        displayStatus: "Stav"
     )
 
     static let de = PingFeatureStrings(
@@ -186,7 +179,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Host, Domain oder IP",
         router: "Router",
         down: "Nicht erreichbar",
-        menuBarDown: "AUS",
         resolving: "Wird aufgelöst…",
         unresolved: "Nicht auflösbar",
         unavailable: "Ping nicht verfügbar",
@@ -199,7 +191,7 @@ extension PingFeatureStrings {
         noTargets: "Keine Ping-Ziele",
         displayLabel: "Ping-Anzeige",
         displayGraph: "Diagramm",
-        displayDot: "Statuspunkt"
+        displayStatus: "Status"
     )
 
     static let fr = PingFeatureStrings(
@@ -208,7 +200,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Hôte, domaine ou IP",
         router: "Routeur",
         down: "Injoignable",
-        menuBarDown: "HS",
         resolving: "Résolution…",
         unresolved: "Résolution impossible",
         unavailable: "Ping indisponible",
@@ -221,7 +212,7 @@ extension PingFeatureStrings {
         noTargets: "Aucune cible de ping",
         displayLabel: "Affichage du ping",
         displayGraph: "Graphique",
-        displayDot: "Point d’état"
+        displayStatus: "État"
     )
 
     static let it = PingFeatureStrings(
@@ -230,7 +221,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Host, dominio o IP",
         router: "Router",
         down: "Non raggiungibile",
-        menuBarDown: "OFF",
         resolving: "Risoluzione…",
         unresolved: "Impossibile risolvere",
         unavailable: "Ping non disponibile",
@@ -243,7 +233,7 @@ extension PingFeatureStrings {
         noTargets: "Nessuna destinazione ping",
         displayLabel: "Visualizzazione ping",
         displayGraph: "Grafico",
-        displayDot: "Punto di stato"
+        displayStatus: "Stato"
     )
 
     static let ja = PingFeatureStrings(
@@ -252,7 +242,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "ホスト、ドメイン、IP",
         router: "ルーター",
         down: "応答なし",
-        menuBarDown: "断",
         resolving: "名前解決中…",
         unresolved: "名前を解決できません",
         unavailable: "Pingを利用できません",
@@ -265,7 +254,7 @@ extension PingFeatureStrings {
         noTargets: "Ping の宛先がありません",
         displayLabel: "Ping 表示",
         displayGraph: "グラフ",
-        displayDot: "状態ドット"
+        displayStatus: "状態"
     )
 
     static let ko = PingFeatureStrings(
@@ -274,7 +263,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "호스트, 도메인 또는 IP",
         router: "라우터",
         down: "응답 없음",
-        menuBarDown: "끊김",
         resolving: "확인 중…",
         unresolved: "확인할 수 없음",
         unavailable: "핑을 사용할 수 없음",
@@ -287,7 +275,7 @@ extension PingFeatureStrings {
         noTargets: "핑 대상 없음",
         displayLabel: "핑 표시",
         displayGraph: "그래프",
-        displayDot: "상태 점"
+        displayStatus: "상태"
     )
 
     static let zhHans = PingFeatureStrings(
@@ -296,7 +284,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "主机、域名或 IP",
         router: "路由器",
         down: "不可达",
-        menuBarDown: "断开",
         resolving: "正在解析…",
         unresolved: "无法解析",
         unavailable: "Ping 不可用",
@@ -309,7 +296,7 @@ extension PingFeatureStrings {
         noTargets: "没有 Ping 目标",
         displayLabel: "Ping 显示",
         displayGraph: "图表",
-        displayDot: "状态圆点"
+        displayStatus: "状态"
     )
 
     static let zhTW = PingFeatureStrings(
@@ -318,7 +305,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "主機、網域或 IP",
         router: "路由器",
         down: "無法連線",
-        menuBarDown: "中斷",
         resolving: "正在解析…",
         unresolved: "無法解析",
         unavailable: "無法使用 Ping",
@@ -331,7 +317,7 @@ extension PingFeatureStrings {
         noTargets: "沒有 Ping 目標",
         displayLabel: "Ping 顯示",
         displayGraph: "圖表",
-        displayDot: "狀態圓點"
+        displayStatus: "狀態"
     )
 
     static let zhHK = PingFeatureStrings(
@@ -340,7 +326,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "主機、網域或 IP",
         router: "路由器",
         down: "無法連線",
-        menuBarDown: "中斷",
         resolving: "正在解析…",
         unresolved: "無法解析",
         unavailable: "無法使用 Ping",
@@ -353,7 +338,7 @@ extension PingFeatureStrings {
         noTargets: "沒有 Ping 目標",
         displayLabel: "Ping 顯示",
         displayGraph: "圖表",
-        displayDot: "狀態圓點"
+        displayStatus: "狀態"
     )
 
     static let uk = PingFeatureStrings(
@@ -362,7 +347,6 @@ extension PingFeatureStrings {
         targetPlaceholder: "Хост, домен або IP",
         router: "Роутер",
         down: "Недоступний",
-        menuBarDown: "НЕМАЄ",
         resolving: "Визначення адреси…",
         unresolved: "Не вдається визначити адресу",
         unavailable: "Пінг недоступний",
@@ -375,6 +359,6 @@ extension PingFeatureStrings {
         noTargets: "Немає вузлів для пінгу",
         displayLabel: "Відображення пінгу",
         displayGraph: "Графік",
-        displayDot: "Індикатор стану"
+        displayStatus: "Статус"
     )
 }

@@ -26,7 +26,7 @@ struct MenuBarMetricsPreview: View {
     @AppStorage(DefaultsKey.menuBarConnectedDevices) private var connectedDevices = false
     @AppStorage(DefaultsKey.menuBarPing) private var ping = false
     @AppStorage(DefaultsKey.menuBarPingTarget) private var pingTarget = PingTargets.defaultMenuBarTarget
-    @AppStorage(DefaultsKey.menuBarPingStyle) private var pingStyle = PingMenuBarStyle.graph.rawValue
+    @AppStorage(DefaultsKey.menuBarPingStyle) private var pingStyle = PingMenuBarStyle.status.rawValue
     @AppStorage(DefaultsKey.menuBarMetricOrder) private var metricOrder = ""
     @AppStorage(DefaultsKey.menuBarCombineTemperatures) private var combineTemperatures = true
     @AppStorage(DefaultsKey.menuBarMetricAppearance) private var metricAppearance = "values"
@@ -199,11 +199,7 @@ struct MenuBarMetricsPreview: View {
                         .frame(width: MenuBarRenderer.pingGraphSize(style: style).width,
                                height: MenuBarRenderer.pingGraphSize(style: style).height)
                 }
-                metricBlock(label: label,
-                            value: value,
-                            minimumValue: PingFormat.menuBarReserves[0],
-                            style: style,
-                            pressure: mode == .dot ? MenuBarRenderer.pingPressure(state) : nil)
+                pingBlock(label: label, value: value, state: state, style: style)
             }
             .fixedSize(horizontal: true, vertical: true)
         case let .diskActivityBlock(read, write, style):
@@ -270,6 +266,35 @@ struct MenuBarMetricsPreview: View {
                                alignment: .center)
                 }
             }
+        }
+        .foregroundStyle(.white)
+        .fixedSize(horizontal: true, vertical: true)
+    }
+
+    private func pingBlock(label: String,
+                           value: String,
+                           state: PingTracker.State,
+                           style: MenuBarBlockStyle) -> some View {
+        VStack(spacing: -1) {
+            Text(label)
+                .font(.system(size: style == .readable ? 7.2 : 6.6, weight: .medium))
+            Text(value)
+                .font(.system(size: style == .readable ? 13 : 12,
+                              weight: .semibold,
+                              design: .monospaced))
+                .foregroundStyle(state == .down ? Color.red : state == .suspect ? Color.white.opacity(0.55) : Color.white)
+                .frame(minWidth: style == .readable ? 24 : 22, alignment: .trailing)
+                .overlay(alignment: .bottom) {
+                    if state != .unknown {
+                        PingUnderline()
+                            .stroke(dotColor(MenuBarRenderer.pingPressure(state)),
+                                    style: StrokeStyle(lineWidth: 1.1,
+                                                       lineCap: .round,
+                                                       dash: state == .suspect ? [2.2, 1.6] : []))
+                            .frame(height: 1.1)
+                            .offset(y: 0.5)
+                    }
+                }
         }
         .foregroundStyle(.white)
         .fixedSize(horizontal: true, vertical: true)
@@ -367,5 +392,14 @@ struct MenuBarMetricsPreview: View {
             }
         }
         .foregroundStyle(.white)
+    }
+}
+
+private struct PingUnderline: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
     }
 }

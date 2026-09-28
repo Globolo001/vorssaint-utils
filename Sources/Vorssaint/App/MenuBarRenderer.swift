@@ -1200,10 +1200,6 @@ enum MenuBarRenderer {
         CGSize(width: style == .readable ? 20 : 18, height: style == .readable ? 13 : 12)
     }
 
-    static func pingDotDiameter(style: MenuBarBlockStyle) -> CGFloat {
-        style == .readable ? 5.2 : 4.8
-    }
-
     static func pingPressure(_ state: PingTracker.State) -> MemoryPressure {
         switch state {
         case .up: return .normal
@@ -1220,12 +1216,11 @@ enum MenuBarRenderer {
                                        state: PingTracker.State,
                                        mode: PingMenuBarStyle,
                                        style: MenuBarBlockStyle) -> NSImage {
-        let downText = FeatureStrings.ping(L10n.shared.language).menuBarDown
         let graphKey = graph.indices.map { index in
             graph[index].isFinite ? String(Int(graph[index].rounded()))
                 : (index < lost.count && lost[index] ? "x" : "-")
         }.joined(separator: ",")
-        let cacheKey = "ping|\(label)|\(value)|\(downText)|\(state)|\(mode)|\(style)|\(graphKey)" as NSString
+        let cacheKey = "ping|\(label)|\(value)|\(state)|\(mode)|\(style)|\(graphKey)" as NSString
         if let cached = blockImageCache.object(forKey: cacheKey) { return cached }
 
         let labelFont = NSFont.systemFont(ofSize: style == .readable ? 7.2 : 6.6, weight: .medium)
@@ -1234,46 +1229,51 @@ enum MenuBarRenderer {
         let valueSizing: [NSAttributedString.Key: Any] = [.font: valueFont]
         let labelSize = (label as NSString).size(withAttributes: [.font: labelFont])
         let valueSize = (value as NSString).size(withAttributes: valueSizing)
-        let reservedWidth = (PingFormat.menuBarReserves + [downText])
+        let columnWidth = PingFormat.menuBarReserves
             .map { ($0 as NSString).size(withAttributes: valueSizing).width }
             .max() ?? 0
-        let textWidth = max(labelSize.width, reservedWidth)
+        let tileWidth = max(labelSize.width, columnWidth)
         let graphSize = pingGraphSize(style: style)
-        let markWidth = mode == .graph ? graphSize.width : pingDotDiameter(style: style)
-        let gap: CGFloat = mode == .graph ? 3 : 4
-        let width = ceil(markWidth + gap + textWidth + (style == .readable ? 2 : 0.5))
+        let markWidth: CGFloat = mode == .graph ? graphSize.width + 3 : 0
+        let width = ceil(markWidth + tileWidth + (style == .readable ? 2 : 0.5))
         let height: CGFloat = style == .readable ? 23 : 21
+        let valueY: CGFloat = style == .readable ? -0.4 : -0.8
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             NSColor.clear.setFill()
             rect.fill()
-            switch mode {
-            case .graph:
+            if mode == .graph {
                 let graphRect = NSRect(x: 0,
                                        y: (height - graphSize.height) / 2 - 1,
                                        width: graphSize.width,
                                        height: graphSize.height)
                 drawPingGraph(graph, lost: lost, in: graphRect, state: state)
-            case .dot:
-                let diameter = pingDotDiameter(style: style)
-                nsColor(for: pingPressure(state)).setFill()
-                NSBezierPath(ovalIn: NSRect(x: 0,
-                                            y: style == .readable ? 4.1 : 3.5,
-                                            width: diameter,
-                                            height: diameter)).fill()
             }
-            let textX = markWidth + gap
-            (label as NSString).draw(at: NSPoint(x: textX + (textWidth - labelSize.width) / 2,
+            let tileX = markWidth + (width - markWidth - tileWidth) / 2
+            (label as NSString).draw(at: NSPoint(x: tileX + (tileWidth - labelSize.width) / 2,
                                                  y: style == .readable ? 12.9 : 12.0),
                                      withAttributes: dynamicTextAttributes(font: labelFont))
+            let columnX = tileX + (tileWidth - columnWidth) / 2
             var valueAttrs = dynamicTextAttributes(font: valueFont)
             switch state {
             case .down: valueAttrs[.foregroundColor] = NSColor.systemRed
             case .suspect: valueAttrs[.foregroundColor] = NSColor.secondaryLabelColor
             case .up, .unknown: break
             }
-            (value as NSString).draw(at: NSPoint(x: textX + (textWidth - valueSize.width) / 2,
-                                                 y: style == .readable ? -0.4 : -0.8),
+            (value as NSString).draw(at: NSPoint(x: columnX + columnWidth - valueSize.width, y: valueY),
                                      withAttributes: valueAttrs)
+            guard state != .unknown else { return true }
+            let thickness: CGFloat = 1.1
+            let lineY = max(thickness / 2, valueY - valueFont.descender - 1 - thickness / 2)
+            let underline = NSBezierPath()
+            underline.move(to: NSPoint(x: columnX + thickness / 2, y: lineY))
+            underline.line(to: NSPoint(x: columnX + columnWidth - thickness / 2, y: lineY))
+            underline.lineWidth = thickness
+            underline.lineCapStyle = .round
+            if state == .suspect {
+                underline.setLineDash([2.2, 1.6], count: 2, phase: 0)
+            }
+            nsColor(for: pingPressure(state)).setStroke()
+            underline.stroke()
             return true
         }
         image.isTemplate = false
@@ -1325,7 +1325,7 @@ enum MenuBarRenderer {
 
     private static func pingValue(for reading: PingReading) -> String {
         if reading.isUnreachable {
-            return FeatureStrings.ping(L10n.shared.language).menuBarDown
+            return PingFormat.menuBarDown
         }
         return PingFormat.menuBarValue(reading.lastRTT)
     }
