@@ -1198,11 +1198,12 @@ enum MenuBarRenderer {
         CGSize(width: style == .readable ? 20 : 18, height: style == .readable ? 13 : 12)
     }
 
-    static func pingLevel(_ state: PingTracker.State) -> MenuBarUsageBarSupport.Level? {
+    static func pingPressure(_ state: PingTracker.State) -> MemoryPressure {
         switch state {
-        case .suspect: return .elevated
+        case .up: return .normal
+        case .suspect: return .warning
         case .down: return .critical
-        case .up, .unknown: return nil
+        case .unknown: return .unknown
         }
     }
 
@@ -1213,8 +1214,7 @@ enum MenuBarRenderer {
                                        mode: PingMenuBarStyle,
                                        style: MenuBarBlockStyle) -> NSImage {
         let graphKey = graph.map { $0.isFinite ? String(Int($0.rounded())) : "x" }.joined(separator: ",")
-        let tintHex = pingLevel(state).map { MenuBarUsageBarSupport.currentColorHex(for: $0) }
-        let cacheKey = "ping|\(label)|\(value)|\(state)|\(tintHex ?? "none")|\(mode)|\(style)|\(graphKey)" as NSString
+        let cacheKey = "ping|\(label)|\(value)|\(state)|\(mode)|\(style)|\(graphKey)" as NSString
         if let cached = blockImageCache.object(forKey: cacheKey) { return cached }
 
         let labelFont = NSFont.systemFont(ofSize: style == .readable ? 7.2 : 6.6, weight: .medium)
@@ -1227,18 +1227,17 @@ enum MenuBarRenderer {
             .map { ($0 as NSString).size(withAttributes: valueSizing).width }
             .max() ?? 0)
         let graphSize = pingGraphSize(style: style)
-        let iconSide: CGFloat = style == .readable ? 12.4 : 11.4
+        let dotDiameter: CGFloat = style == .readable ? 5.2 : 4.8
+        let dotGap: CGFloat = 4
         let leading: CGFloat = mode == .graph ? graphSize.width + 3 : 0
-        let trailing: CGFloat = mode == .status ? 3 + iconSide : 0
-        let padding: CGFloat = style == .readable ? 2 : 0.5
-        let width = ceil(leading + columnWidth + trailing + padding)
-        let columnEnd = mode == .status ? width - padding / 2 - trailing : width
+        let trailing: CGFloat = mode == .status ? dotGap + dotDiameter : 0
+        let groupWidth = leading + columnWidth + trailing
+        let width = ceil(groupWidth + (style == .readable ? 2 : 0.5))
         let height: CGFloat = style == .readable ? 23 : 21
-        let iconColor: NSColor = tintHex.map { usageBarColor(hex: $0) }
-            ?? (state == .unknown ? .secondaryLabelColor : .labelColor)
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             NSColor.clear.setFill()
             rect.fill()
+            let groupX = (width - groupWidth) / 2
             if mode == .graph {
                 let graphRect = NSRect(x: 0,
                                        y: (height - graphSize.height) / 2 - 1,
@@ -1246,26 +1245,21 @@ enum MenuBarRenderer {
                                        height: graphSize.height)
                 drawPingGraph(graph, in: graphRect, state: state)
             }
-            let columnX = leading + (columnEnd - leading - columnWidth) / 2
+            let columnX = mode == .graph ? leading + (width - leading - columnWidth) / 2 : groupX
             (label as NSString).draw(at: NSPoint(x: columnX + (columnWidth - labelSize.width) / 2,
                                                  y: style == .readable ? 12.9 : 12.0),
                                      withAttributes: dynamicTextAttributes(font: labelFont))
-            (value as NSString).draw(at: NSPoint(x: columnX + (columnWidth - valueSize.width) / 2,
-                                                 y: style == .readable ? -0.4 : -0.8),
+            let valueX = mode == .status
+                ? columnX + columnWidth - valueSize.width
+                : columnX + (columnWidth - valueSize.width) / 2
+            (value as NSString).draw(at: NSPoint(x: valueX, y: style == .readable ? -0.4 : -0.8),
                                      withAttributes: dynamicTextAttributes(font: valueFont))
             if mode == .status {
-                let configuration = NSImage.SymbolConfiguration(pointSize: style == .readable ? 11.8 : 10.8,
-                                                                weight: .semibold)
-                    .applying(NSImage.SymbolConfiguration(paletteColors: [iconColor]))
-                if let symbol = NSImage(systemSymbolName: MenuBarMetric.ping.symbolName, accessibilityDescription: nil)?
-                    .withSymbolConfiguration(configuration) {
-                    let scale = min(iconSide / symbol.size.width, iconSide / symbol.size.height, 1)
-                    let drawSize = NSSize(width: symbol.size.width * scale, height: symbol.size.height * scale)
-                    symbol.draw(in: NSRect(x: columnEnd + 3 + (iconSide - drawSize.width) / 2,
-                                           y: (height - drawSize.height) / 2,
-                                           width: drawSize.width,
-                                           height: drawSize.height))
-                }
+                nsColor(for: pingPressure(state)).setFill()
+                NSBezierPath(ovalIn: NSRect(x: columnX + columnWidth + dotGap,
+                                            y: style == .readable ? 4.1 : 3.5,
+                                            width: dotDiameter,
+                                            height: dotDiameter)).fill()
             }
             return true
         }

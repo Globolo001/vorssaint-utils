@@ -199,12 +199,14 @@ struct MenuBarMetricsPreview: View {
                         .frame(width: MenuBarRenderer.pingGraphSize(style: style).width,
                                height: MenuBarRenderer.pingGraphSize(style: style).height)
                 }
-                pingBlock(label: label, value: value, style: style)
+                pingBlock(label: label, value: value, trailing: mode == .status, style: style)
                 if mode == .status {
-                    Image(systemName: MenuBarMetric.ping.symbolName)
-                        .font(.system(size: style == .readable ? 11.8 : 10.8, weight: .semibold))
-                        .foregroundStyle(MenuBarRenderer.pingLevel(state).map(levelColor)
-                                         ?? (state == .unknown ? Color.white.opacity(0.55) : Color.white))
+                    Circle()
+                        .fill(dotColor(MenuBarRenderer.pingPressure(state)))
+                        .frame(width: style == .readable ? 5.2 : 4.8,
+                               height: style == .readable ? 5.2 : 4.8)
+                        .padding(.leading, 1)
+                        .offset(y: style == .readable ? 3.5 : 3)
                 }
             }
             .fixedSize(horizontal: true, vertical: true)
@@ -279,6 +281,7 @@ struct MenuBarMetricsPreview: View {
 
     private func pingBlock(label: String,
                            value: String,
+                           trailing: Bool,
                            style: MenuBarBlockStyle) -> some View {
         VStack(spacing: -1) {
             Text(label)
@@ -287,7 +290,7 @@ struct MenuBarMetricsPreview: View {
                 .font(.system(size: style == .readable ? 13 : 12,
                               weight: .semibold,
                               design: .monospaced))
-                .frame(minWidth: style == .readable ? 39 : 36, alignment: .center)
+                .frame(minWidth: style == .readable ? 39 : 36, alignment: trailing ? .trailing : .center)
         }
         .foregroundStyle(.white)
         .fixedSize(horizontal: true, vertical: true)
