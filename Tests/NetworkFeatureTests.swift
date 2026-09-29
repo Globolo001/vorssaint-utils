@@ -431,5 +431,35 @@ enum NetworkFeatureTests {
         single.push(6)
         suite.expect(single.values == [6], "capacity 1 keeps only newest")
 
+        suite.expect(TimedMetricHistory.slotCount(span: 120, slotSeconds: 2) == 60
+                && TimedMetricHistory.slotCount(span: 120, slotSeconds: 1) == 120
+                && TimedMetricHistory.slotCount(span: 120, slotSeconds: 0) == 2,
+               "a timed window covers the same span at every sampling interval")
+        var timed = TimedMetricHistory(span: 10)
+        let emptyWindow = timed.window(now: 100, slotSeconds: 2)
+        suite.expect(emptyWindow.count == 5 && emptyWindow.allSatisfy(\.isNaN),
+               "an empty timed history is a full window of gaps")
+        timed.push(10, at: 92)
+        timed.push(30, at: 96)
+        timed.push(40, at: 100)
+        let sparse = timed.window(now: 100, slotSeconds: 2)
+        suite.expect(sparse.count == 5 && sparse[0] == 10 && sparse[1].isNaN && sparse[2] == 30
+                && sparse[3].isNaN && sparse[4] == 40,
+               "samples land at their real time and missing time stays a gap")
+        let later = timed.window(now: 106, slotSeconds: 2)
+        suite.expect(later[0].isNaN && later[1] == 40 && later[2].isNaN && later[3].isNaN && later[4].isNaN,
+               "a pause shifts old samples left and leaves blank slots instead of stitching")
+        suite.expect(timed.window(now: 200, slotSeconds: 2).allSatisfy(\.isNaN),
+               "samples older than the window fall out of view")
+        timed.push(20, at: 94)
+        suite.expect(timed.window(now: 100, slotSeconds: 2)[1] == 20, "a late sample is placed by its own time")
+        timed.push(50, at: 130)
+        suite.expect(timed.times.first.map { $0 >= 110 } == true, "samples beyond twice the span are pruned")
+        timed.push(.nan, at: 131)
+        suite.expect(timed.values.allSatisfy(\.isFinite), "an unmeasured rate is never stored")
+        suite.expect(timed.publishedValues(whileVisible: false, now: 130, slotSeconds: 2).isEmpty
+                && timed.publishedValues(whileVisible: true, now: 130, slotSeconds: 2).count == 5,
+               "hidden timed graphs publish nothing without discarding samples")
+
     }
 }

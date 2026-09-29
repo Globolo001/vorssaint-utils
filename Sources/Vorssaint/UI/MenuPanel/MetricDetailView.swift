@@ -255,19 +255,17 @@ struct MetricDetailView: View {
 
     @ViewBuilder
     private var networkGraph: some View {
-        let down = monitor.snapshot.netDownHistory
-        let up = monitor.snapshot.netUpHistory
-        if down.count >= 2 || up.count >= 2 {
-            let peak = max(down.max() ?? 0, up.max() ?? 0, 1)
-            ZStack {
-                Sparkline(values: down, color: .accentColor, maxValue: peak, showsZeroBaseline: true)
-                Sparkline(values: up,
-                          color: PanelMetricColor.green(for: colorScheme),
-                          maxValue: peak,
-                          fillOpacity: 0.08)
-            }
-            .frame(height: 38)
+        let down = NetworkSection.graphValues(monitor.snapshot.netDownHistory)
+        let up = NetworkSection.graphValues(monitor.snapshot.netUpHistory)
+        let peak = max((down + up).filter(\.isFinite).max() ?? 0, 1)
+        ZStack {
+            Sparkline(values: down, color: .accentColor, maxValue: peak, showsZeroBaseline: true)
+            Sparkline(values: up,
+                      color: PanelMetricColor.green(for: colorScheme),
+                      maxValue: peak,
+                      fillOpacity: 0.08)
         }
+        .frame(height: 38)
     }
 
     @ViewBuilder

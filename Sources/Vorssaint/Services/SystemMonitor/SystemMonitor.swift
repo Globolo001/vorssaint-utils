@@ -208,8 +208,8 @@ final class SystemMonitor: ObservableObject {
     private var gpuHistory: MetricHistory
     private var memoryHistory: MetricHistory
     private var memoryAppHistory: MetricHistory
-    private var netDownHistory: MetricHistory
-    private var netUpHistory: MetricHistory
+    private var netDownHistory: TimedMetricHistory
+    private var netUpHistory: TimedMetricHistory
     private var diskReadHistory: MetricHistory
     private var diskWriteHistory: MetricHistory
     private var powerHistory: MetricHistory
@@ -221,8 +221,8 @@ final class SystemMonitor: ObservableObject {
         gpuHistory = MetricHistory(capacity: historyCapacity)
         memoryHistory = MetricHistory(capacity: historyCapacity)
         memoryAppHistory = MetricHistory(capacity: historyCapacity)
-        netDownHistory = MetricHistory(capacity: historyCapacity)
-        netUpHistory = MetricHistory(capacity: historyCapacity)
+        netDownHistory = TimedMetricHistory(span: TimeInterval(historyCapacity))
+        netUpHistory = TimedMetricHistory(span: TimeInterval(historyCapacity))
         diskReadHistory = MetricHistory(capacity: historyCapacity)
         diskWriteHistory = MetricHistory(capacity: historyCapacity)
         powerHistory = MetricHistory(capacity: historyCapacity)
@@ -747,8 +747,9 @@ final class SystemMonitor: ObservableObject {
                     next.netUpBytesPerSec = network.upBytesPerSec
                     next.netTotalDown = network.totalDown
                     next.netTotalUp = network.totalUp
-                    if let down = network.downBytesPerSec { self.netDownHistory.push(down) }
-                    if let up = network.upBytesPerSec { self.netUpHistory.push(up) }
+                    let sampledAt = Self.continuousTime()
+                    if let down = network.downBytesPerSec { self.netDownHistory.push(down, at: sampledAt) }
+                    if let up = network.upBytesPerSec { self.netUpHistory.push(up, at: sampledAt) }
                 }
             }
 
@@ -887,10 +888,17 @@ final class SystemMonitor: ObservableObject {
                 ? self.memoryHistory.publishedValues(whileVisible: foregroundSampling) : []
             next.memoryAppHistory = plan.needMemory
                 ? self.memoryAppHistory.publishedValues(whileVisible: foregroundSampling) : []
+            let networkNow = Self.continuousTime()
+            let networkSlot = TimeInterval(max(1, intervalSeconds)
+                * MonitorSamplingPolicy.sampleStride(for: .network,
+                                                     intervalSeconds: intervalSeconds,
+                                                     foreground: foregroundSampling))
             next.netDownHistory = plan.needNetwork
-                ? self.netDownHistory.publishedValues(whileVisible: foregroundSampling) : []
+                ? self.netDownHistory.publishedValues(whileVisible: foregroundSampling,
+                                                      now: networkNow, slotSeconds: networkSlot) : []
             next.netUpHistory = plan.needNetwork
-                ? self.netUpHistory.publishedValues(whileVisible: foregroundSampling) : []
+                ? self.netUpHistory.publishedValues(whileVisible: foregroundSampling,
+                                                    now: networkNow, slotSeconds: networkSlot) : []
             next.diskReadHistory = plan.needDisk
                 ? self.diskReadHistory.publishedValues(whileVisible: foregroundSampling) : []
             next.diskWriteHistory = plan.needDisk
@@ -1109,6 +1117,10 @@ final class SystemMonitor: ObservableObject {
     }
 
     // MARK: - GPU usage
+
+    private static func continuousTime() -> TimeInterval {
+        TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
+    }
 
     /// "Device Utilization %" published by the graphics accelerator
     /// (AGXAccelerator on Apple Silicon).
