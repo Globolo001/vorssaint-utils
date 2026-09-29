@@ -68,6 +68,8 @@ struct SystemSnapshot {
     // Connected USB Devices
     var connectedDevices: [ConnectedUSBDevice] = []
 
+    var pings: [PingReading] = []
+
     // History (oldest → newest) for the graphs
     var cpuHistory: [Double] = []          // 0...1
     var gpuHistory: [Double] = []          // 0...1
@@ -173,6 +175,7 @@ final class SystemMonitor: ObservableObject {
     private let peripheralBatterySampler = PeripheralBatterySampler()
     private var powerSampler: PowerSampler?
     private let usbSampler = USBDeviceSampler()
+    private let pingSampler = PingSampler()
 
     // Running state
     private var previousCPUTicks: (busy: UInt64, total: UInt64, time: TimeInterval)?
@@ -199,6 +202,8 @@ final class SystemMonitor: ObservableObject {
     private var lastPowerReading: PowerReading?
     private var lastPeripheralBatterySample = PeripheralBatterySample()
     private var lastConnectedDevices: [ConnectedUSBDevice] = []
+    private var lastPingReadings: [PingReading] = []
+    private var pingPaused = true
     private var lastPublishedPlan: SamplingPlan?
     private var lastPublishedForeground: Bool?
 
@@ -481,6 +486,9 @@ final class SystemMonitor: ObservableObject {
         var needBatteryTemperature = false
         var needFanSpeed = false
         var needConnectedDevices = false
+        var pingTargets: [PingHost] = []
+
+        var needPing: Bool { !pingTargets.isEmpty }
 
         var needSMC: Bool { needPower || needTemperature || needFanSpeed }
 
@@ -490,7 +498,8 @@ final class SystemMonitor: ObservableObject {
 
         var any: Bool {
             needCPU || needMemory || needNetwork || needDisk || needPower ||
-                needPeripheralBattery || needGPUUsage || needTemperature || needFanSpeed || needConnectedDevices
+                needPeripheralBattery || needGPUUsage || needTemperature || needFanSpeed || needConnectedDevices ||
+                needPing
         }
     }
 
@@ -559,6 +568,10 @@ final class SystemMonitor: ObservableObject {
         }
         plan.needConnectedDevices = menuPanelNeeds.connectedDevices
             || defaults.bool(forKey: DefaultsKey.menuBarConnectedDevices)
+        if defaults.bool(forKey: DefaultsKey.menuBarPing)
+            || (panelNeedsNetwork && defaults.bool(forKey: DefaultsKey.monitorNetPing)) {
+            plan.pingTargets = PingTargets.hosts(from: defaults.string(forKey: DefaultsKey.pingTargets) ?? "")
+        }
 
         // The hub gates whole metric families: an unavailable metric never
         // samples, no matter what is pinned, shown or alerting.
@@ -574,7 +587,10 @@ final class SystemMonitor: ObservableObject {
             plan.needGPUTemperature = false
         }
         if !available(.monitorMemory) { plan.needMemory = false }
-        if !available(.monitorNetwork) { plan.needNetwork = false }
+        if !available(.monitorNetwork) {
+            plan.needNetwork = false
+            plan.pingTargets = []
+        }
         if !available(.monitorDisk) { plan.needDisk = false }
         if !available(.monitorPower) {
             plan.needPower = false
@@ -603,6 +619,11 @@ final class SystemMonitor: ObservableObject {
         guard !shouldSample() else { return }
         timer?.invalidate()
         timer = nil
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.pingSampler.pause()
+            self.pingPaused = true
+        }
     }
 
     /// Keeps the timer waking only when the next needed sample can be due.
@@ -635,6 +656,7 @@ final class SystemMonitor: ObservableObject {
         if plan.needTemperature { kinds.append(.temperature) }
         if plan.needFanSpeed { kinds.append(.fanSpeed) }
         if plan.needConnectedDevices { kinds.append(.connectedDevices) }
+        if plan.needPing { kinds.append(.ping) }
         return kinds
     }
 
@@ -704,6 +726,21 @@ final class SystemMonitor: ObservableObject {
                                                                 foreground: foregroundSampling)
                 if sample { sampledAnything = true }
                 return sample
+            }
+
+            if plan.needPing {
+                if take(.ping) {
+                    self.pingPaused = false
+                    let stride = MonitorSamplingPolicy.sampleStride(for: .ping,
+                                                                    intervalSeconds: intervalSeconds,
+                                                                    foreground: foregroundSampling)
+                    self.lastPingReadings = self.pingSampler.sample(targets: plan.pingTargets,
+                                                                    slotSeconds: TimeInterval(max(1, intervalSeconds) * stride))
+                }
+                next.pings = self.lastPingReadings
+            } else if !self.pingPaused {
+                self.pingSampler.pause()
+                self.pingPaused = true
             }
 
             if plan.needCPU {

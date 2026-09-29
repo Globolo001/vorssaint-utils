@@ -393,6 +393,10 @@ enum NetworkFeatureTests {
         suite.expect(wakeKinds.allSatisfy {
             MonitorSamplingPolicy.sampleStride(for: $0, intervalSeconds: 2, foreground: false) % cadence == 0
         }, "monitor wake cadence divides every needed stride")
+        suite.expect(MonitorSamplingPolicy.sampleStride(for: .ping, intervalSeconds: 2, foreground: false) == 1,
+               "a pinned ping is read on every tick in the background")
+        suite.expect(MonitorSamplingPolicy.wakeTicks(for: [.temperature, .ping], intervalSeconds: 2, foreground: false) == 1,
+               "a ping keeps the monitor waking every tick")
         suite.expect(MonitorSamplingPolicy.alignedTick(16, wakeTicks: 8) == 16,
                "monitor tick already on the wake grid stays put")
         suite.expect(MonitorSamplingPolicy.alignedTick(7, wakeTicks: 8) == 8,
