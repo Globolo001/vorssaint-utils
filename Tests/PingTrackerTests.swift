@@ -1,0 +1,465 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Vorssaint
+
+import Foundation
+
+enum PingTrackerTests {
+    static func run(_ suite: TestSuite) {
+        hosts(suite)
+        estimator(suite)
+        stateMachine(suite)
+        lateAndStaleReplies(suite)
+        history(suite)
+        framing(suite)
+        targets(suite)
+        readings(suite)
+        strings(suite)
+        sendErrors(suite)
+    }
+
+    private static func hosts(_ suite: TestSuite) {
+        suite.expect(PingHost("1.1.1.1")?.kind == .ipv4, "a dotted quad is an IPv4 literal")
+        suite.expect(PingHost("2606:4700::1111")?.kind == .ipv6, "an IPv6 address is an IPv6 literal")
+        suite.expect(PingHost("[::1]")?.text == "::1", "brackets around an IPv6 literal are dropped")
+        suite.expect(PingHost("  Example.COM. ")?.text == "example.com",
+                     "a name is trimmed, lowercased and loses its root dot")
+        suite.expect(PingHost("router")?.kind == .name, "a single-label local name is accepted")
+        suite.expect(PingHost("https://www.apple.com/de/")?.text == "www.apple.com",
+                     "a pasted URL is reduced to its host")
+        for invalid in ["", "   ", "256.1.1.1", "1.2.3", "exa mple.com", "-bad.com", "a..b", "host:80"] {
+            suite.expect(PingHost(invalid) == nil, "\(invalid.debugDescription) is not a ping target")
+        }
+    }
+
+    private static func estimator(_ suite: TestSuite) {
+        var estimator = PingTimeoutEstimator()
+        suite.expectClose(estimator.timeout, PingTimeoutEstimator.initialTimeout,
+                          "before any reply the timeout is the initial one")
+        for _ in 0..<40 { estimator.observe(rtt: 0.012) }
+        suite.expectClose(estimator.timeout, PingTimeoutEstimator.minimumTimeout,
+                          "a steady fast host is held to the minimum timeout, not its tiny RTT")
+        suite.expectClose(estimator.smoothedRTT ?? 0, 0.012, "a steady RTT smooths to itself")
+
+        var steadySlow = PingTimeoutEstimator()
+        for _ in 0..<40 { steadySlow.observe(rtt: 0.6) }
+        suite.expect(steadySlow.timeout > 0.6 && steadySlow.timeout < 0.8,
+                     "a steady slow host waits just past its RTT (\(steadySlow.timeout))")
+
+        var jittery = PingTimeoutEstimator()
+        for index in 0..<40 { jittery.observe(rtt: index.isMultiple(of: 2) ? 0.2 : 0.6) }
+        suite.expect(jittery.timeout > steadySlow.timeout,
+                     "jitter widens the timeout beyond the mean RTT")
+
+        var huge = PingTimeoutEstimator()
+        huge.observe(rtt: 30)
+        suite.expectClose(huge.timeout, PingTimeoutEstimator.maximumTimeout,
+                          "the timeout never exceeds the maximum")
+        huge.observe(rtt: .nan)
+        huge.observe(rtt: -1)
+        suite.expectClose(huge.smoothedRTT ?? 0, 30, "invalid RTTs are ignored")
+    }
+
+    private static func stateMachine(_ suite: TestSuite) {
+        var tracker = PingTracker()
+        suite.expect(tracker.state == .unknown, "a new target is unknown")
+
+        tracker.sent(sequence: 1, at: 0)
+        let up = tracker.received(sequence: 1, at: 0.02)
+        suite.expect(up?.state == .up && up?.stateChanged == true, "the first reply brings the target up")
+        suite.expectClose(up?.sample.rtt ?? -1, 0.02, "the reply carries its round trip")
+        suite.expect(tracker.received(sequence: 1, at: 0.03) == nil, "a duplicate reply is ignored")
+        suite.expect(tracker.received(sequence: 99, at: 0.03) == nil, "a reply to nothing sent is ignored")
+
+        let timeout = tracker.sent(sequence: 2, at: 1)
+        suite.expect(tracker.expire(now: 1 + timeout - 0.01).isEmpty, "a probe is not lost before its timeout")
+        let suspect = tracker.expire(now: 2)
+        suite.expect(suspect.count == 1 && suspect.first?.state == .suspect && suspect.first?.stateChanged == true,
+                     "one missed reply only makes the target suspect")
+        suite.expect(suspect.first?.sample.rtt == nil, "the miss is published as a lost sample")
+        suite.expect(tracker.expire(now: 2.5).isEmpty, "a probe expires only once")
+
+        tracker.sent(sequence: 3, at: 2)
+        let down = tracker.expire(now: 3)
+        suite.expect(down.first?.state == .down && down.first?.stateChanged == true,
+                     "the second consecutive miss marks the target down")
+
+        tracker.sent(sequence: 4, at: 3)
+        let stillDown = tracker.expire(now: 4)
+        suite.expect(stillDown.first?.state == .down && stillDown.first?.stateChanged == false,
+                     "further misses keep it down")
+
+        tracker.sent(sequence: 5, at: 4)
+        let recovered = tracker.received(sequence: 5, at: 4.015)
+        suite.expect(recovered?.state == .up && recovered?.stateChanged == true,
+                     "the next reply recovers a down target")
+        suite.expect(tracker.consecutiveMisses == 0, "a reply clears the miss count")
+
+        tracker.sent(sequence: 6, at: 5)
+        _ = tracker.expire(now: 6)
+        tracker.sent(sequence: 7, at: 6)
+        let saved = tracker.received(sequence: 7, at: 6.02)
+        suite.expect(saved?.state == .up && saved?.stateChanged == true,
+                     "a reply on the next tick clears a suspect target without it going down")
+
+        var batch = PingTracker()
+        batch.sent(sequence: 1, at: 0)
+        batch.sent(sequence: 2, at: 0.5)
+        let both = batch.expire(now: 10)
+        suite.expect(both.map(\.sample.sequence) == [1, 2] && both.last?.state == .down,
+                     "probes that expire in the same tick are judged oldest first")
+
+        var unsent = PingTracker()
+        unsent.sent(sequence: 1, at: 0)
+        let failed = unsent.sendFailed(sequence: 1, at: 0)
+        suite.expect(failed.state == .suspect, "a send that fails counts as a miss at once")
+        suite.expect(unsent.received(sequence: 1, at: 0.01) == nil, "a failed send expects no reply")
+
+        var timed = PingTracker()
+        suite.expectClose(timed.sent(sequence: 1, at: 0), PingTimeoutEstimator.initialTimeout,
+                          "the first probe waits the initial timeout")
+        _ = timed.received(sequence: 1, at: 0.01)
+        suite.expect(timed.sent(sequence: 2, at: 1) < PingTimeoutEstimator.initialTimeout,
+                     "later probes wait for a timeout learned from replies")
+
+        var slow = PingTracker()
+        for sequence in 0..<20 {
+            slow.sent(sequence: UInt16(sequence), at: Double(sequence))
+            _ = slow.received(sequence: UInt16(sequence), at: Double(sequence) + 1.4)
+        }
+        slow.sent(sequence: 100, at: 100)
+        suite.expect(slow.expire(now: 101).isEmpty,
+                     "on a link slower than the tick, a probe survives the next tick")
+        suite.expect(slow.received(sequence: 100, at: 101.4)?.sample.late == false,
+                     "and its reply on the tick after is on time, not late")
+    }
+
+    private static func lateAndStaleReplies(_ suite: TestSuite) {
+        var tracker = PingTracker()
+        tracker.sent(sequence: 1, at: 0)
+        _ = tracker.received(sequence: 1, at: 0.01)
+        tracker.sent(sequence: 2, at: 1)
+        _ = tracker.expire(now: 2)
+        let late = tracker.received(sequence: 2, at: 2.1)
+        suite.expect(late?.state == .up && late?.sample.late == true,
+                     "a late reply still proves the host is up and is marked late")
+        suite.expectClose(late?.sample.rtt ?? -1, 1.1, "a late reply keeps its true round trip")
+        suite.expect((tracker.estimator.smoothedRTT ?? 0) > 0.01,
+                     "a late reply teaches the estimator that replies can take longer")
+
+        var overlap = PingTracker()
+        overlap.sent(sequence: 1, at: 0)
+        overlap.sent(sequence: 2, at: 1)
+        _ = overlap.received(sequence: 2, at: 1.02)
+        let stale = overlap.expire(now: 2).first
+        suite.expect(stale?.sample.rtt == nil && stale?.state == .up && stale?.stateChanged == false,
+                     "losing a probe older than one already answered does not make the target suspect")
+        suite.expect(overlap.consecutiveMisses == 0, "a stale loss does not count as a miss")
+
+        var crowded = PingTracker()
+        for sequence in 0..<200 { crowded.sent(sequence: UInt16(sequence), at: Double(sequence) * 0.01) }
+        suite.expect(crowded.received(sequence: 0, at: 2.5) == nil,
+                     "the oldest unanswered probes are forgotten once too many are waiting")
+        suite.expect(crowded.received(sequence: 199, at: 2.5) != nil, "the newest probe is still matched")
+
+        var old = PingTracker()
+        old.sent(sequence: 1, at: 0)
+        old.sent(sequence: 2, at: PingTracker.rememberedSeconds + 1)
+        suite.expect(old.received(sequence: 1, at: PingTracker.rememberedSeconds + 1.1) == nil,
+                     "a reply after the remembered window is not matched")
+    }
+
+    private static func history(_ suite: TestSuite) {
+        let slots = PingHistory.slotCount(span: PingHistory.span, slotSeconds: 2)
+        suite.expect(slots == 60 && PingHistory.slotCount(span: PingHistory.span, slotSeconds: 1) == 120
+                        && PingHistory.slotCount(span: PingHistory.span, slotSeconds: 5) == 24,
+                     "the window covers the same span at every sampling interval")
+
+        var arrivals = PingHistory()
+        arrivals.record(PingSample(sequence: 1, sentAt: 10, rtt: 0.02, late: false))
+        arrivals.record(PingSample(sequence: 2, sentAt: 500, rtt: nil, late: false))
+        arrivals.record(PingSample(sequence: 3, sentAt: 11, rtt: 0.03, late: true))
+        arrivals.record(PingSample(sequence: 4, sentAt: 501, rtt: 0.04, late: false))
+        suite.expect(arrivals.recent.count == 3 && arrivals.recent[0] == 20 && arrivals.recent[1].isNaN
+                        && arrivals.recent[2] == 40,
+                     "the menu bar graph keeps answers back to back in arrival order, a loss as a gap")
+        for index in 0..<200 { arrivals.record(PingSample(sequence: UInt16(index), sentAt: 600, rtt: 0.01, late: false)) }
+        suite.expect(arrivals.recent.count == PingHistory.recentCapacity, "the menu bar graph history is bounded")
+
+        let empty = PingHistory().window(now: 100, slotSeconds: 2)
+        suite.expect(empty.rttMs.count == slots && empty.rttMs.allSatisfy(\.isNaN) && !empty.lost.contains(1),
+                     "an empty history is a full window of gaps")
+
+        var history = PingHistory()
+        history.record(PingSample(sequence: 3, sentAt: 96, rtt: 0.03, late: false))
+        history.record(PingSample(sequence: 1, sentAt: 92, rtt: 0.02, late: false))
+        history.record(PingSample(sequence: 2, sentAt: 94, rtt: nil, late: false))
+        history.record(PingSample(sequence: 0, sentAt: 90, rtt: nil, late: false))
+        suite.expect(history.samples.map(\.sequence) == [0, 1, 2, 3], "samples are kept in send order")
+        suite.expectClose(history.lossRatio(now: 98), 0.5, "loss ratio counts unanswered probes")
+        let window = history.window(now: 98, slotSeconds: 2)
+        suite.expect(window.rttMs.count == slots, "the window never grows or shrinks with the data")
+        suite.expect(window.rttMs[slots - 1] == 30 && window.rttMs[slots - 3] == 20,
+                     "each reply sits in the slot of the tick that sent it")
+        suite.expect(window.rttMs[slots - 2].isNaN && window.lost[slots - 2] == 1,
+                     "a lost probe is a marked gap, never a zero")
+
+        history.record(PingSample(sequence: 2, sentAt: 94, rtt: 3.4, late: true))
+        let backfilled = history.window(now: 98, slotSeconds: 2)
+        suite.expect(backfilled.rttMs[slots - 2] == 3400 && backfilled.lost[slots - 2] == 0,
+                     "a reply after the timeout replaces its loss mark with its real round trip in its send slot")
+        suite.expect(backfilled.lost[slots - 4] == 1, "a probe that never answers stays marked lost")
+        suite.expectClose(history.lossRatio(now: 98), 0.25, "a late reply no longer counts as lost")
+        history.record(PingSample(sequence: 9, sentAt: 50, rtt: 0.5, late: true))
+        history.record(PingSample(sequence: 1, sentAt: 92, rtt: 0.7, late: true))
+        suite.expect(history.samples.count == 4 && history.window(now: 98, slotSeconds: 2).rttMs[slots - 3] == 20,
+                     "a late reply without a recorded loss, or for an answered probe, changes nothing")
+        suite.expect(window.rttMs[..<(slots - 4)].allSatisfy(\.isNaN) && !window.lost[..<(slots - 4)].contains(1),
+                     "a young history fills from the right and leaves the left empty")
+
+        let later = history.window(now: 110, slotSeconds: 2)
+        suite.expect(later.rttMs[slots - 7] == 30 && later.rttMs[(slots - 6)...].allSatisfy(\.isNaN)
+                        && !later.lost[(slots - 6)...].contains(1),
+                     "ticks without a probe stay empty instead of pulling the line together")
+
+        var paused = PingHistory()
+        paused.record(PingSample(sequence: 1, sentAt: 0, rtt: 0.01, late: false))
+        paused.record(PingSample(sequence: 2, sentAt: 2, rtt: 0.01, late: false))
+        paused.record(PingSample(sequence: 3, sentAt: 60, rtt: 0.012, late: false))
+        let resumed = paused.window(now: 62, slotSeconds: 2)
+        let finite = resumed.rttMs.indices.filter { resumed.rttMs[$0].isFinite }
+        suite.expect(finite == [slots - 31, slots - 30, slots - 1],
+                     "a pause keeps its real length on the time axis")
+
+        let jittered = PingHistory.slotCount(span: PingHistory.span, slotSeconds: 2)
+        var jitter = PingHistory()
+        jitter.record(PingSample(sequence: 1, sentAt: 10.3, rtt: 0.01, late: false))
+        jitter.record(PingSample(sequence: 2, sentAt: 11.9, rtt: 0.02, late: false))
+        let snapped = jitter.window(now: 14.1, slotSeconds: 2)
+        suite.expect(snapped.rttMs[jittered - 2] == 10 && snapped.rttMs[jittered - 1] == 20,
+                     "timer jitter still lands each probe in its own slot")
+
+        var old = PingHistory()
+        old.record(PingSample(sequence: 1, sentAt: 0, rtt: 0.01, late: false))
+        old.record(PingSample(sequence: 2, sentAt: 1000, rtt: 0.01, late: false))
+        suite.expect(old.samples.count == 1, "samples far outside the window are dropped")
+        suite.expect(!old.window(now: 1002, slotSeconds: 2).rttMs.dropLast().contains(where: \.isFinite),
+                     "nothing from before the window leaks into it")
+
+        suite.expectClose(history.lossRatio(now: 98), 0.25, "loss ratio is over the probes in the window")
+        suite.expect(PingHistory().lossRatio(now: 0) == 0, "an empty history has no loss")
+    }
+
+    private static func targets(_ suite: TestSuite) {
+        suite.expect(PingHost(PingHost.gatewayToken) == PingHost.gateway && PingHost.gateway.kind == .gateway,
+                     "the router token parses to the gateway target")
+        suite.expect(PingHost("router")?.kind == .name, "a host literally named router stays a name")
+        suite.expect(!PingHost.gateway.isLiteral && PingHost("1.1.1.1")?.isLiteral == true,
+                     "only address literals skip lookups")
+        suite.expect(PingTargets.hosts(from: PingTargets.defaultList).isEmpty
+                        && PingTargets.adding(PingHost.gateway, to: PingTargets.defaultList) == PingHost.gatewayToken,
+                     "nothing is pinged until a target is added")
+        let starter = PingTargets.raw(from: [PingHost.gateway, PingHost("1.1.1.1")!])
+        suite.expect(PingTargets.hosts(from: "1.1.1.1\n\nbad host\n1.1.1.1\nExample.com") == [PingHost("1.1.1.1")!, PingHost("example.com")!],
+                     "saved targets skip blanks, invalid entries and duplicates")
+        let many = (1...10).map { "10.0.0.\($0)" }.joined(separator: "\n")
+        suite.expect(PingTargets.hosts(from: many).count == PingTargets.maximumCount, "targets are capped")
+        let added = PingTargets.adding(PingHost("8.8.8.8")!, to: starter)
+        suite.expect(PingTargets.hosts(from: added).last == PingHost("8.8.8.8"), "a new target goes last")
+        suite.expect(PingTargets.adding(PingHost("1.1.1.1")!, to: starter) == starter,
+                     "adding a present target changes nothing")
+        suite.expect(PingTargets.hosts(from: PingTargets.removing(PingHost.gateway, from: added))
+                         == [PingHost("1.1.1.1")!, PingHost("8.8.8.8")!],
+                     "removing a target keeps the others in order")
+        let router = PingReading(host: PingHost.gateway)
+        let cloudflare = PingReading(host: PingHost("1.1.1.1")!)
+        suite.expect(PingTargets.menuBarReading(in: [router, cloudflare], pinned: "1.1.1.1") == cloudflare,
+                     "the menu bar shows the pinned target")
+        suite.expect(PingTargets.menuBarReading(in: [router, cloudflare], pinned: "gone.example") == router,
+                     "a pinned target that was removed falls back to the first one")
+        suite.expect(PingTargets.menuBarReading(in: [], pinned: "1.1.1.1") == nil, "no targets, no menu bar value")
+    }
+
+    private static func readings(_ suite: TestSuite) {
+        var reading = PingReading(host: PingHost("1.1.1.1")!)
+        reading.rttHistory = [12, 0, 14]
+        reading.lostHistory = [0, 1, 0]
+        let graph = reading.graphValues
+        suite.expect(graph.count == 3 && graph[0] == 12 && graph[1].isNaN && graph[2] == 14,
+                     "a lost probe is a gap in the graph, not a zero")
+        suite.expect(reading.answeredMilliseconds == [12, 14], "statistics use answered probes only")
+        suite.expect(reading.lostMarks == [false, true, false] && reading.hasSamples,
+                     "only a lost probe carries a loss mark")
+        var sparse = PingReading(host: PingHost("1.1.1.1")!)
+        sparse.rttHistory = [.nan, 12, .nan]
+        sparse.lostHistory = [0, 0, 0]
+        suite.expect(sparse.lostMarks == [false, false, false] && sparse.answeredMilliseconds == [12],
+                     "a slot without data is an unmarked gap")
+        sparse.slotSeconds = 2
+        let menuBar = sparse.window(seconds: 10)
+        suite.expect(menuBar.values.count == 5 && menuBar.values[0].isNaN && menuBar.values[1].isNaN
+                        && menuBar.values[3] == 12,
+                     "a shorter view pads on the left to keep its own fixed span")
+        sparse.slotSeconds = 1
+        suite.expect(sparse.window(seconds: 2).values.count == 2, "a shorter view keeps the newest slots")
+        suite.expect(!PingReading(host: PingHost("1.1.1.1")!).hasSamples, "a fresh reading has no samples")
+        suite.expect(!reading.isUnreachable, "an answering target is reachable")
+        reading.state = .down
+        suite.expect(reading.isUnreachable, "a down target is unreachable")
+        var unresolved = PingReading(host: PingHost("nothing.invalid")!)
+        unresolved.problem = .unresolved
+        suite.expect(unresolved.isUnreachable, "a name that never resolved is unreachable")
+        unresolved.problem = .resolving
+        suite.expect(!unresolved.isUnreachable, "a name still resolving is not yet unreachable")
+
+        MetricFormat.locale = Locale(identifier: "en_US")
+        suite.expect(PingFormat.value(0.0146) == "15" && PingFormat.value(0.0042) == "4"
+                        && PingFormat.value(0.281) == "281" && PingFormat.value(0.9994) == "999",
+                     "under a second the value is whole milliseconds without a unit")
+        suite.expect(PingFormat.value(0.0002) == "<1", "a sub-millisecond reply never reads as zero")
+        suite.expect(PingFormat.value(0.9996) == "1.00s" && PingFormat.value(1) == "1.00s"
+                        && PingFormat.value(3.12) == "3.12s" && PingFormat.value(9.994) == "9.99s",
+                     "from one second the value is seconds with two decimals")
+        suite.expect(PingFormat.value(9.996) == "10.0s" && PingFormat.value(10.4) == "10.4s"
+                        && PingFormat.value(99.94) == "99.9s",
+                     "from ten seconds the value keeps three significant digits")
+        suite.expect(PingFormat.value(99.96) == "100s" && PingFormat.value(104) == "104s"
+                        && PingFormat.value(998.4) == "998s" && PingFormat.value(5000) == "999s",
+                     "from a hundred seconds the value is whole seconds, capped at 999s")
+        let range = [0.0] + (0..<17_000).map { 0.0001 * pow(1.001, Double($0)) }
+        suite.expect(range.allSatisfy { seconds in
+            [false, true].allSatisfy { mode in
+                PingFormat.value(seconds, inSeconds: mode).count <= 5
+            }
+        }, "every value across the range fits five characters")
+        suite.expect(PingFormat.value(0.985, inSeconds: true) == "0.98s" && PingFormat.value(0.9904, inSeconds: true) == "0.99s"
+                        && PingFormat.value(0.985, inSeconds: false) == "985",
+                     "between 980 and 999 ms the mode picks the unit")
+        suite.expect(PingFormat.value(1.2, inSeconds: false) == "1.20s" && PingFormat.value(0.3, inSeconds: true) == "300",
+                     "outside the crossing the value alone picks the unit")
+        var seconds = false
+        var shown: [String] = []
+        for rtt in [0.2, 0.99, 0.9994, 0.9995, 1.4, 0.99, 0.985, 0.98, 0.9799, 0.99, 0.5] {
+            seconds = PingFormat.showsSeconds(rtt, previously: seconds)
+            shown.append(PingFormat.value(rtt, inSeconds: seconds))
+        }
+        suite.expect(shown == ["200", "990", "999", "1.00s", "1.40s", "0.99s", "0.98s", "0.98s", "980", "990", "500"],
+                     "seconds start at 1000 ms and only give way below 980 ms")
+        suite.expect(PingFormat.showsSeconds(nil, previously: true) && !PingFormat.showsSeconds(.nan, previously: false),
+                     "no reply keeps the current unit")
+        suite.expect(PingFormat.menuBarReserves.contains("88.8s"), "the menu bar column is sized for the widest value")
+        suite.expect(PingFormat.menuBarLabel == "PING", "the menu bar label carries no unit")
+        suite.expect(PingFormat.menuBarReserves.contains(PingFormat.menuBarDown),
+                     "the down mark fits the reserved value column")
+        suite.expect(PingMenuBarStyle(rawValue: "status") == .status && PingMenuBarStyle(rawValue: "graph") == .graph
+                        && PingMenuBarStyle(rawValue: "dot") == nil,
+                     "the menu bar ping style has a status and a graph mode")
+        suite.expect(PingFormat.value(nil) == "–" && PingFormat.value(nil, inSeconds: true) == "–",
+                     "no reply yet reads as a dash")
+        suite.expect(PingFormat.percent(0) == "0%" && PingFormat.percent(0.005) == "0.5%" && PingFormat.percent(0.25) == "25%",
+                     "loss keeps a decimal only below one percent")
+        suite.expect(PingFormat.summary([3, 4, 11]) == "3/6/11 ms", "summary is min/avg/max")
+        suite.expect(PingFormat.summary([12, 300, 1500]) == "12/604/1.50s",
+                     "a summary reaching a second drops the shared ms unit")
+        suite.expect(PingFormat.summary([]) == nil, "no answers, no summary")
+        MetricFormat.locale = Locale(identifier: "de_DE")
+        suite.expect(PingFormat.value(3.12) == "3,12s", "seconds follow the region’s decimal mark")
+        MetricFormat.locale = .current
+    }
+
+    private static func framing(_ suite: TestSuite) {
+        let payload: [UInt8] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        let v4 = ICMPEcho.request(identifier: 0xBEEF, sequence: 0x0102, payload: payload, ipv6: false)
+        suite.expect(v4[0] == ICMPEcho.requestV4 && v4.count == ICMPEcho.headerLength + payload.count,
+                     "an IPv4 echo request has the echo type and carries the payload")
+        suite.expect(ICMPEcho.checksum(v4) == 0, "an IPv4 request carries a valid checksum")
+        suite.expect(ICMPEcho.checksum([0x45, 0x00, 0x00, 0x73]) == ~UInt16(0x4573),
+                     "the checksum is the ones' complement sum")
+
+        var reply = v4
+        reply[0] = ICMPEcho.replyV4
+        reply[2] = 0; reply[3] = 0
+        let sum = ICMPEcho.checksum(reply)
+        reply[2] = UInt8(sum >> 8); reply[3] = UInt8(sum & 0xff)
+        let ipHeader: [UInt8] = [0x45] + [UInt8](repeating: 0, count: 19)
+        let parsed = ICMPEcho.parseReply(ipHeader + reply, ipv6: false)
+        suite.expect(parsed == ICMPEcho.Reply(identifier: 0xBEEF, sequence: 0x0102, payload: payload),
+                     "an IPv4 reply is read past its IP header")
+        suite.expect(ICMPEcho.parseReply(reply, ipv6: false)?.sequence == 0x0102,
+                     "an IPv4 reply without an IP header is read too")
+        var corrupt = ipHeader + reply
+        corrupt[corrupt.count - 1] ^= 0xff
+        suite.expect(ICMPEcho.parseReply(corrupt, ipv6: false) == nil, "a corrupted IPv4 reply is dropped")
+        suite.expect(ICMPEcho.parseReply(ipHeader + v4, ipv6: false) == nil,
+                     "our own echo request is not a reply")
+        suite.expect(ICMPEcho.parseReply(Array(reply.prefix(5)), ipv6: false) == nil,
+                     "a truncated packet is dropped")
+
+        let v6 = ICMPEcho.request(identifier: 7, sequence: 9, payload: payload, ipv6: true)
+        suite.expect(v6[0] == ICMPEcho.requestV6 && v6[2] == 0 && v6[3] == 0,
+                     "an IPv6 request leaves the checksum to the kernel")
+        var v6Reply = v6
+        v6Reply[0] = ICMPEcho.replyV6
+        suite.expect(ICMPEcho.parseReply(v6Reply, ipv6: true)
+                         == ICMPEcho.Reply(identifier: 7, sequence: 9, payload: payload),
+                     "an IPv6 reply arrives without an IP header")
+        func controlMessage(level: Int32, type: Int32, seconds: Int64, microseconds: Int32) -> [UInt8] {
+            var bytes: [UInt8] = []
+            func append<T>(_ value: T) { withUnsafeBytes(of: value) { bytes += $0 } }
+            append(UInt32(28)); append(level); append(type)
+            append(seconds); append(microseconds); append(Int32(0))
+            return bytes
+        }
+        let stamp = controlMessage(level: 0xffff, type: 2, seconds: 1_800_000_000, microseconds: 250_000)
+        suite.expectClose(ICMPEcho.kernelTimestamp(control: stamp, length: 28, level: 0xffff, type: 2) ?? 0,
+                          1_800_000_000.25, "the kernel receive stamp is read from the control message")
+        let other = controlMessage(level: 0xffff, type: 7, seconds: 1, microseconds: 0)
+        suite.expectClose(ICMPEcho.kernelTimestamp(control: other + stamp, length: 56, level: 0xffff, type: 2) ?? 0,
+                          1_800_000_000.25, "other control messages are skipped")
+        suite.expect(ICMPEcho.kernelTimestamp(control: stamp, length: 20, level: 0xffff, type: 2) == nil,
+                     "a truncated control buffer yields no stamp")
+        suite.expect(ICMPEcho.kernelTimestamp(control: [], length: 0, level: 0xffff, type: 2) == nil,
+                     "no control data yields no stamp")
+        suite.expectClose(ICMPEcho.uptime(ofWallTime: 99.6, uptime: 500, wallNow: 100), 499.6,
+                          "a reply stamped before the tick is placed back on the uptime clock")
+        suite.expectClose(ICMPEcho.uptime(ofWallTime: 101, uptime: 500, wallNow: 100), 500,
+                          "a stamp from the future falls back to the read time")
+        suite.expectClose(ICMPEcho.uptime(ofWallTime: 0, uptime: 500, wallNow: 100), 500,
+                          "a wall clock jump falls back to the read time")
+
+        var neighbor = v6Reply
+        neighbor[0] = 135
+        suite.expect(ICMPEcho.parseReply(neighbor, ipv6: true) == nil, "other ICMPv6 messages are ignored")
+    }
+
+    private static func strings(_ suite: TestSuite) {
+        let english = FeatureStrings.ping(.enUS)
+        for language in AppLanguage.allCases {
+            LocalizationTests.check(FeatureStrings.ping(language), against: english,
+                                    name: "ping/\(language.rawValue)", suite: suite)
+        }
+    }
+
+    private static func sendErrors(_ suite: TestSuite) {
+        for code in [EPIPE, EBADF, ENOTSOCK, ENOTCONN, ECONNRESET, EDESTADDRREQ] {
+            suite.expect(PingSocketError.needsNewSocket(code), "send error \(code) replaces the socket")
+        }
+        for code in [EHOSTUNREACH, ENETUNREACH, ENETDOWN, EHOSTDOWN, ENOBUFS, EAGAIN, 0] {
+            suite.expect(!PingSocketError.needsNewSocket(code), "send error \(code) keeps the socket")
+        }
+
+        var tunnel = PingTracker()
+        tunnel.sent(sequence: 1, at: 0)
+        _ = tunnel.received(sequence: 1, at: 0.02)
+        var history = PingHistory()
+        for sequence in UInt16(2)...4 {
+            tunnel.sent(sequence: sequence, at: Double(sequence))
+            history.record(tunnel.sendFailed(sequence: sequence, at: Double(sequence)).sample)
+        }
+        suite.expect(tunnel.state == .down && history.lossRatio(now: 5) == 1,
+                     "repeated send failures mark each probe lost and the target down")
+        tunnel.sent(sequence: 5, at: 5)
+        let recovered = tunnel.received(sequence: 5, at: 5.03)
+        suite.expect(recovered?.state == .up && recovered?.stateChanged == true,
+                     "the target recovers on the first reply after send failures")
+    }
+}

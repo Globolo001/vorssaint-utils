@@ -431,3 +431,47 @@ struct MetricHistory {
         visible ? values : []
     }
 }
+
+struct TimedMetricHistory {
+    let span: TimeInterval
+    private(set) var times: [TimeInterval] = []
+    private(set) var values: [Double] = []
+
+    init(span: TimeInterval) {
+        self.span = max(1, span)
+    }
+
+    static func slotCount(span: TimeInterval, slotSeconds: TimeInterval) -> Int {
+        guard slotSeconds.isFinite, slotSeconds > 0 else { return 2 }
+        return max(2, Int((span / slotSeconds).rounded()))
+    }
+
+    mutating func push(_ value: Double, at time: TimeInterval) {
+        guard value.isFinite, time.isFinite else { return }
+        let index = times.lastIndex { $0 <= time }.map { $0 + 1 } ?? 0
+        times.insert(time, at: index)
+        values.insert(value, at: index)
+        let cutoff = (times.last ?? time) - span * 2
+        let stale = times.prefix { $0 < cutoff }.count
+        if stale > 0 {
+            times.removeFirst(stale)
+            values.removeFirst(stale)
+        }
+    }
+
+    func window(now: TimeInterval, slotSeconds: TimeInterval) -> [Double] {
+        let count = Self.slotCount(span: span, slotSeconds: slotSeconds)
+        var slots = [Double](repeating: .nan, count: count)
+        guard slotSeconds.isFinite, slotSeconds > 0 else { return slots }
+        for (time, value) in zip(times, values) {
+            let age = ((now - time) / slotSeconds).rounded()
+            guard age >= 0, age < Double(count) else { continue }
+            slots[count - 1 - Int(age)] = value
+        }
+        return slots
+    }
+
+    func publishedValues(whileVisible visible: Bool, now: TimeInterval, slotSeconds: TimeInterval) -> [Double] {
+        visible ? window(now: now, slotSeconds: slotSeconds) : []
+    }
+}

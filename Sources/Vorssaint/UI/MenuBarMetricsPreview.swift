@@ -24,6 +24,9 @@ struct MenuBarMetricsPreview: View {
     @AppStorage(DefaultsKey.menuBarPower) private var power = false
     @AppStorage(DefaultsKey.menuBarFanSpeed) private var fanSpeed = false
     @AppStorage(DefaultsKey.menuBarConnectedDevices) private var connectedDevices = false
+    @AppStorage(DefaultsKey.menuBarPing) private var ping = false
+    @AppStorage(DefaultsKey.menuBarPingTarget) private var pingTarget = PingTargets.defaultMenuBarTarget
+    @AppStorage(DefaultsKey.menuBarPingStyle) private var pingStyle = PingMenuBarStyle.status.rawValue
     @AppStorage(DefaultsKey.menuBarMetricOrder) private var metricOrder = ""
     @AppStorage(DefaultsKey.menuBarCombineTemperatures) private var combineTemperatures = true
     @AppStorage(DefaultsKey.menuBarMetricAppearance) private var metricAppearance = "values"
@@ -56,6 +59,8 @@ struct MenuBarMetricsPreview: View {
         let _ = diskStyle
         let _ = temperatureUnit
         let _ = metricSpacing
+        let _ = pingTarget
+        let _ = pingStyle
         let metrics = activeMetrics
         let lines = separateMetrics ? [] : MenuBarRenderer.lines(for: monitor.snapshot, metrics: metrics)
         // Separate items are their own status items, which macOS seats to
@@ -134,6 +139,7 @@ struct MenuBarMetricsPreview: View {
         let _ = power
         let _ = fanSpeed
         let _ = connectedDevices
+        let _ = ping
         return MenuBarMetric.enabled(in: .standard)
     }
 
@@ -184,6 +190,21 @@ struct MenuBarMetricsPreview: View {
             .frame(width: MenuBarRenderer.rateBlockWidth(style: style),
                    height: style == .readable ? 22 : 20,
                    alignment: .center)
+        case let .pingBlock(label, value, graph, state, mode, style):
+            HStack(spacing: 3) {
+                if mode == .graph {
+                    PingGraphShape(values: graph)
+                        .stroke(state == .down ? Color.red : Color.white,
+                                style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                        .frame(width: MenuBarRenderer.pingGraphSize(style: style).width,
+                               height: MenuBarRenderer.pingGraphSize(style: style).height)
+                }
+                pingBlock(label: label,
+                          value: value,
+                          pressure: mode == .status ? MenuBarRenderer.pingPressure(state) : nil,
+                          style: style)
+            }
+            .fixedSize(horizontal: true, vertical: true)
         case let .diskActivityBlock(read, write, style):
             VStack(alignment: .trailing, spacing: -0.6) {
                 Text("R\(read)")
@@ -248,6 +269,31 @@ struct MenuBarMetricsPreview: View {
                                alignment: .center)
                 }
             }
+        }
+        .foregroundStyle(.white)
+        .fixedSize(horizontal: true, vertical: true)
+    }
+
+    private func pingBlock(label: String,
+                           value: String,
+                           pressure: MemoryPressure?,
+                           style: MenuBarBlockStyle) -> some View {
+        VStack(spacing: -1) {
+            HStack(spacing: 2.2) {
+                Text(label)
+                    .font(.system(size: style == .readable ? 7.2 : 6.6, weight: .medium))
+                if let pressure {
+                    Circle()
+                        .fill(dotColor(pressure))
+                        .frame(width: style == .readable ? 4.8 : 4.4,
+                               height: style == .readable ? 4.8 : 4.4)
+                }
+            }
+            Text(value)
+                .font(.system(size: style == .readable ? 13 : 12,
+                              weight: .semibold,
+                              design: .monospaced))
+                .frame(minWidth: style == .readable ? 39 : 36, alignment: .center)
         }
         .foregroundStyle(.white)
         .fixedSize(horizontal: true, vertical: true)
