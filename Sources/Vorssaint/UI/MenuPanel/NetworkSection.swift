@@ -18,6 +18,7 @@ struct NetworkSection: View {
     @AppStorage(DefaultsKey.monitorNetTotals) private var netTotals = true
     @AppStorage(DefaultsKey.monitorNetTest) private var netTest = true
     @AppStorage(DefaultsKey.monitorNetAddresses) private var netAddresses = true
+    @AppStorage(DefaultsKey.monitorNetPing) private var netPing = true
     @AppStorage(DefaultsKey.panelNetworkOrder) private var networkOrderRaw = ""
     @State private var draggingBlock: Block?
     @State private var appRows: [ProcessUsage] = []
@@ -78,7 +79,7 @@ struct NetworkSection: View {
         }
     }
 
-    private enum Block: String, PanelOrderItem { case speed, apps, totals, addresses, test }
+    private enum Block: String, PanelOrderItem { case speed, ping, apps, totals, addresses, test }
 
     private var visibleBlocks: [Block] {
         orderedBlocks.filter(isVisible)
@@ -104,6 +105,7 @@ struct NetworkSection: View {
     private func isVisible(_ block: Block) -> Bool {
         switch block {
         case .speed: return netSpeed
+        case .ping: return netPing
         case .apps: return netApps
         case .totals: return netTotals
         case .addresses: return netAddresses
@@ -119,12 +121,14 @@ struct NetworkSection: View {
         netTotals = true
         netAddresses = true
         netTest = true
+        netPing = true
     }
 
     @ViewBuilder
     private func blockContent(_ block: Block, editing: Bool) -> some View {
         switch block {
         case .speed: speedBlock(editing: editing)
+        case .ping: PingBlock(isVisible: $netPing, editing: editing)
         case .apps: appUsageBlock(editing: editing)
         case .totals: totalsRow(editing: editing)
         case .addresses: NetworkAddressBlock(service: addresses, isVisible: $netAddresses, editing: editing)

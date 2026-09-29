@@ -102,7 +102,7 @@ extension MenuBarMetric {
             return .gpu
         case .memory:
             return .memory
-        case .network:
+        case .network, .ping:
             return .network
         case .diskUsage, .diskActivity:
             return .disk

@@ -13,6 +13,7 @@ enum PingTrackerTests {
         framing(suite)
         targets(suite)
         readings(suite)
+        strings(suite)
         sendErrors(suite)
     }
 
@@ -427,6 +428,14 @@ enum PingTrackerTests {
         var neighbor = v6Reply
         neighbor[0] = 135
         suite.expect(ICMPEcho.parseReply(neighbor, ipv6: true) == nil, "other ICMPv6 messages are ignored")
+    }
+
+    private static func strings(_ suite: TestSuite) {
+        let english = FeatureStrings.ping(.enUS)
+        for language in AppLanguage.allCases {
+            LocalizationTests.check(FeatureStrings.ping(language), against: english,
+                                    name: "ping/\(language.rawValue)", suite: suite)
+        }
     }
 
     private static func sendErrors(_ suite: TestSuite) {

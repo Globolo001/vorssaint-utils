@@ -16,6 +16,8 @@ struct Sparkline: View {
     var fillOpacity: Double = 0.16
     var lineWidth: CGFloat = 1.5
     var showsZeroBaseline = false
+    var gapMarks: [Bool] = []
+    var gapMarkColor: Color? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -56,6 +58,14 @@ struct Sparkline: View {
                         }
                     }
                     .fill(color)
+                    if let gapMarkColor {
+                        Path { path in
+                            for x in gapPositions(in: geometry.size) {
+                                path.addRect(CGRect(x: x - 0.6, y: baselineY - 5, width: 1.2, height: 5))
+                            }
+                        }
+                        .fill(gapMarkColor)
+                    }
                 }
             }
         }
@@ -79,5 +89,13 @@ struct Sparkline: View {
             runs[runs.count - 1].append(CGPoint(x: x, y: baselineY - plotHeight * CGFloat(normalized)))
         }
         return runs
+    }
+
+    private func gapPositions(in size: CGSize) -> [CGFloat] {
+        guard values.count >= 2 else { return [] }
+        let lastIndex = values.count - 1
+        return gapMarks.prefix(values.count).enumerated().compactMap { index, marked in
+            marked ? size.width * CGFloat(index) / CGFloat(lastIndex) : nil
+        }
     }
 }

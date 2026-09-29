@@ -5,7 +5,7 @@ import AppKit
 
 /// A live reading the user can pin next to the menu bar icon.
 enum MenuBarMetric: String, CaseIterable, Identifiable {
-    case cpu, gpu, memory, cpuTemperature, gpuTemperature, batteryTemperature, network, diskUsage, diskActivity, battery, batteryTime, peripheralBattery, power, fanSpeed, connectedDevices
+    case cpu, gpu, memory, cpuTemperature, gpuTemperature, batteryTemperature, network, ping, diskUsage, diskActivity, battery, batteryTime, peripheralBattery, power, fanSpeed, connectedDevices
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         case .gpuTemperature: return DefaultsKey.menuBarGPUTemperature
         case .batteryTemperature: return DefaultsKey.menuBarBatteryTemperature
         case .network: return DefaultsKey.menuBarNetwork
+        case .ping: return DefaultsKey.menuBarPing
         case .diskUsage: return DefaultsKey.menuBarDiskUsage
         case .diskActivity: return DefaultsKey.menuBarDiskActivity
         case .battery: return DefaultsKey.menuBarBattery
@@ -38,6 +39,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         case .gpuTemperature: return "rectangle.connected.to.line.below"
         case .batteryTemperature: return "battery.100"
         case .network: return "network"
+        case .ping: return "waveform.path.ecg"
         case .diskUsage: return "internaldrive"
         case .diskActivity: return "internaldrive.fill"
         case .battery: return "battery.100"
@@ -58,6 +60,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         case .gpuTemperature: return strings.monitorShowGPUTemperature
         case .batteryTemperature: return strings.monitorShowBatteryTemperature
         case .network: return strings.monitorShowNetwork
+        case .ping: return FeatureStrings.ping(L10n.shared.language).title
         case .diskUsage: return strings.monitorItemDiskUsage
         case .diskActivity: return strings.monitorItemDiskActivity
         case .battery: return strings.batteryLabel
@@ -74,7 +77,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         .gpu, .gpuTemperature,
         .memory,
         .battery, .batteryTime, .batteryTemperature, .peripheralBattery,
-        .network, .diskUsage, .diskActivity, .connectedDevices, .power, .fanSpeed,
+        .network, .ping, .diskUsage, .diskActivity, .connectedDevices, .power, .fanSpeed,
     ]
 
     static func order(in defaults: UserDefaults) -> [MenuBarMetric] {
@@ -95,7 +98,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         case .cpu, .cpuTemperature: return .monitorCPU
         case .gpu, .gpuTemperature: return .monitorGPU
         case .memory: return .monitorMemory
-        case .network: return .monitorNetwork
+        case .network, .ping: return .monitorNetwork
         case .diskUsage, .diskActivity: return .monitorDisk
         case .connectedDevices: return .connectedDevices
         case .battery, .batteryTime, .batteryTemperature, .peripheralBattery, .power: return .monitorPower
@@ -200,6 +203,7 @@ enum MenuBarSegment {
     case metricBlock(label: String, value: String, minimumValue: String, style: MenuBarBlockStyle, pressure: MemoryPressure?)
     case usageBarBlock(label: String, fraction: Double?, style: MenuBarBlockStyle, pressure: MemoryPressure?)
     case networkBlock(down: String, up: String, style: MenuBarBlockStyle)
+    case pingBlock(label: String, value: String, graph: [Double], state: PingTracker.State, mode: PingMenuBarStyle, style: MenuBarBlockStyle)
     case diskActivityBlock(read: String, write: String, style: MenuBarBlockStyle)
     case batteryBlock(percent: Int, isCharging: Bool, style: MenuBarBlockStyle)
     case dot(MemoryPressure)
@@ -401,6 +405,13 @@ enum MenuBarRenderer {
                     items.append(MetricItem(metric: metric,
                                             segments: [.symbol("arrow.down"), .text(" " + downText),
                                                        .text(" "), .symbol("arrow.up"), .text(" " + upText)],
+                                            width: reservedWidth(for: metric, preset: preset)))
+                }
+            case .ping:
+                if let reading = pingReading(in: snapshot) {
+                    let text = pingValue(for: reading)
+                    items.append(MetricItem(metric: metric,
+                                            segments: [.symbol(metric.symbolName), .text(" " + text)],
                                             width: reservedWidth(for: metric, preset: preset)))
                 }
             case .diskUsage:
@@ -607,6 +618,16 @@ enum MenuBarRenderer {
                                                  up: MetricFormat.bytesPerSecCompact(up),
                                                  style: style)])
                 }
+            case .ping:
+                if let reading = pingReading(in: snapshot) {
+                    let mode = PingMenuBarStyle.current
+                    groups.append([.pingBlock(label: PingFormat.menuBarLabel,
+                                              value: pingValue(for: reading),
+                                              graph: mode == .graph ? Array(reading.recentHistory.suffix(pingGraphSamples)) : [],
+                                              state: reading.isUnreachable ? .down : reading.state,
+                                              mode: mode,
+                                              style: style)])
+                }
             case .diskUsage:
                 if let disk = primaryDisk(from: snapshot.disk) {
                     let diskStyle = DiskMenuBarStyle.current
@@ -793,6 +814,8 @@ enum MenuBarRenderer {
             return 12      // symbol + " KBD 100%+9"
         case (_, .network):
             return 15      // down symbol + 1.0G + up symbol + 1.0G
+        case (_, .ping):
+            return 9
         case (_, .diskUsage):
             return DiskMenuBarStyle.current.showsPercentage ? 11 : 14
         case (_, .diskActivity):
@@ -868,6 +891,8 @@ enum MenuBarRenderer {
                                                       pressure: pressure))
             case let .networkBlock(down, up, style):
                 result.append(networkBlockAttachment(down: down, up: up, style: style))
+            case let .pingBlock(label, value, graph, state, mode, style):
+                result.append(pingBlockAttachment(label: label, value: value, graph: graph, state: state, mode: mode, style: style))
             case let .diskActivityBlock(read, write, style):
                 result.append(diskActivityBlockAttachment(read: read, write: write, style: style))
             case let .batteryBlock(percent, isCharging, style):
@@ -956,6 +981,22 @@ enum MenuBarRenderer {
         attachment.image = image
         attachment.bounds = NSRect(x: 0,
                                    y: (style == .readable ? -6.1 : -5.5) + legacyBlockAttachmentNudge,
+                                   width: image.size.width,
+                                   height: image.size.height)
+        return NSAttributedString(attachment: attachment)
+    }
+
+    private static func pingBlockAttachment(label: String,
+                                            value: String,
+                                            graph: [Double],
+                                            state: PingTracker.State,
+                                            mode: PingMenuBarStyle,
+                                            style: MenuBarBlockStyle) -> NSAttributedString {
+        let image = pingBlockImage(label: label, value: value, graph: graph, state: state, mode: mode, style: style)
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = NSRect(x: 0,
+                                   y: (style == .readable ? -5.9 : -5.7) + legacyBlockAttachmentNudge,
                                    width: image.size.width,
                                    height: image.size.height)
         return NSAttributedString(attachment: attachment)
@@ -1151,6 +1192,122 @@ enum MenuBarRenderer {
                                  style: style)
     }
 
+    static let pingGraphSamples = 24
+
+    static func pingGraphSize(style: MenuBarBlockStyle) -> CGSize {
+        CGSize(width: style == .readable ? 20 : 18, height: style == .readable ? 13 : 12)
+    }
+
+    static func pingPressure(_ state: PingTracker.State) -> MemoryPressure {
+        switch state {
+        case .up: return .normal
+        case .suspect: return .warning
+        case .down: return .critical
+        case .unknown: return .unknown
+        }
+    }
+
+    private static func pingBlockImage(label: String,
+                                       value: String,
+                                       graph: [Double],
+                                       state: PingTracker.State,
+                                       mode: PingMenuBarStyle,
+                                       style: MenuBarBlockStyle) -> NSImage {
+        let graphKey = graph.map { $0.isFinite ? String(Int($0.rounded())) : "x" }.joined(separator: ",")
+        let cacheKey = "ping|\(label)|\(value)|\(state)|\(mode)|\(style)|\(graphKey)" as NSString
+        if let cached = blockImageCache.object(forKey: cacheKey) { return cached }
+
+        let labelFont = NSFont.systemFont(ofSize: style == .readable ? 7.2 : 6.6, weight: .medium)
+        let valueFont = NSFont.monospacedDigitSystemFont(ofSize: style == .readable ? 13.0 : 12.0,
+                                                         weight: .semibold)
+        let valueSizing: [NSAttributedString.Key: Any] = [.font: valueFont]
+        let labelSize = (label as NSString).size(withAttributes: [.font: labelFont])
+        let valueSize = (value as NSString).size(withAttributes: valueSizing)
+        let graphSize = pingGraphSize(style: style)
+        let dotDiameter: CGFloat = mode == .status ? (style == .readable ? 4.8 : 4.4) : 0
+        let dotGap: CGFloat = mode == .status ? 2.2 : 0
+        let headerWidth = labelSize.width + dotGap + dotDiameter
+        let columnWidth = max(headerWidth, PingFormat.menuBarReserves
+            .map { ($0 as NSString).size(withAttributes: valueSizing).width }
+            .max() ?? 0)
+        let leading: CGFloat = mode == .graph ? graphSize.width + 3 : 0
+        let width = ceil(leading + columnWidth + (style == .readable ? 2 : 0.5))
+        let height: CGFloat = style == .readable ? 23 : 21
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
+            NSColor.clear.setFill()
+            rect.fill()
+            if mode == .graph {
+                let graphRect = NSRect(x: 0,
+                                       y: (height - graphSize.height) / 2 - 1,
+                                       width: graphSize.width,
+                                       height: graphSize.height)
+                drawPingGraph(graph, in: graphRect, state: state)
+            }
+            let columnX = leading + (width - leading - columnWidth) / 2
+            let labelX = columnX + (columnWidth - headerWidth) / 2
+            let labelY: CGFloat = style == .readable ? 12.9 : 12.0
+            (label as NSString).draw(at: NSPoint(x: labelX, y: labelY),
+                                     withAttributes: dynamicTextAttributes(font: labelFont))
+            if mode == .status {
+                let capMiddle = labelY - labelFont.descender + labelFont.capHeight / 2
+                nsColor(for: pingPressure(state)).setFill()
+                NSBezierPath(ovalIn: NSRect(x: labelX + labelSize.width + dotGap,
+                                            y: capMiddle - dotDiameter / 2,
+                                            width: dotDiameter,
+                                            height: dotDiameter)).fill()
+            }
+            (value as NSString).draw(at: NSPoint(x: columnX + (columnWidth - valueSize.width) / 2,
+                                                 y: style == .readable ? -0.4 : -0.8),
+                                     withAttributes: dynamicTextAttributes(font: valueFont))
+            return true
+        }
+        image.isTemplate = false
+        blockImageCache.setObject(image, forKey: cacheKey, cost: blockImageCost(image))
+        return image
+    }
+
+    private static func drawPingGraph(_ values: [Double], in rect: NSRect, state: PingTracker.State) {
+        guard values.count >= 2 else { return }
+        let finite = values.filter(\.isFinite)
+        let peak = max(20, (finite.max() ?? 0) * 1.1)
+        let step = rect.width / CGFloat(values.count - 1)
+        let line = NSBezierPath()
+        line.lineWidth = 1.2
+        line.lineCapStyle = .round
+        line.lineJoinStyle = .round
+        var drawing = false
+        for (index, value) in values.enumerated() {
+            let x = rect.minX + CGFloat(index) * step
+            guard value.isFinite else {
+                drawing = false
+                NSColor.systemRed.setFill()
+                NSRect(x: x - 0.6, y: rect.minY, width: 1.2, height: 4).fill()
+                continue
+            }
+            let y = rect.minY + 0.5 + (rect.height - 1) * CGFloat(min(1, max(0, value / peak)))
+            if drawing {
+                line.line(to: NSPoint(x: x, y: y))
+            } else {
+                line.move(to: NSPoint(x: x, y: y))
+                drawing = true
+            }
+        }
+        (state == .down ? NSColor.systemRed : NSColor.labelColor).setStroke()
+        line.stroke()
+    }
+
+    private static func pingReading(in snapshot: SystemSnapshot) -> PingReading? {
+        let pinned = UserDefaults.standard.string(forKey: DefaultsKey.menuBarPingTarget) ?? PingTargets.defaultMenuBarTarget
+        return PingTargets.menuBarReading(in: snapshot.pings, pinned: pinned)
+    }
+
+    private static func pingValue(for reading: PingReading) -> String {
+        if reading.isUnreachable {
+            return PingFormat.menuBarDown
+        }
+        return PingFormat.value(reading.lastRTT, inSeconds: reading.showsSeconds)
+    }
+
     private static func diskActivityBlockImage(read: String,
                                                write: String,
                                                style: MenuBarBlockStyle) -> NSImage {
@@ -1280,6 +1437,15 @@ enum MenuBarRenderer {
         snapshot.fanSpeeds = Array(repeating: 20_000, count: fanCount)
         snapshot.netDownBytesPerSec = 1_000_000_000
         snapshot.netUpBytesPerSec = 1_000_000_000
+        var ping = PingReading(host: PingHost.gateway)
+        ping.state = .up
+        ping.lastRTT = 10.4
+        ping.showsSeconds = true
+        let slots = PingHistory.slotCount(span: PingHistory.span, slotSeconds: ping.slotSeconds)
+        ping.rttHistory = Array(repeating: 999, count: slots)
+        ping.lostHistory = Array(repeating: 0, count: slots)
+        ping.recentHistory = Array(repeating: 999, count: pingGraphSamples)
+        snapshot.pings = [ping]
         snapshot.disk = DiskReading(devices: [
             DiskDeviceReading(id: "main",
                               name: "Macintosh HD",
